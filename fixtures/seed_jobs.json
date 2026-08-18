@@ -1,0 +1,13 @@
+[
+  {
+    "jobType": "TLS_SCAN",
+    "manifestVersion": "1.0",
+    "priority": 50,
+    "payload": {
+      "targetRef": "device_441",
+      "credentialsRef": "cred_778",
+      "pluginId": "tls-cert-discovery",
+      "pluginVersion": ">=1.0,<2.0"
+    }
+  }
+]
