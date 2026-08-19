@@ -46,8 +46,12 @@ def clock() -> FakeClock:
 
 
 @pytest.fixture
-def app(clock: FakeClock):
-    return create_app(settings=make_test_settings(), clock=clock)
+async def app(clock: FakeClock):
+    app = create_app(settings=make_test_settings(), clock=clock)
+    # httpx.ASGITransport in this environment does not run ASGI lifespan hooks,
+    # so tests must trigger startup/shutdown explicitly.
+    async with app.router.lifespan_context(app):
+        yield app
 
 
 @pytest.fixture
