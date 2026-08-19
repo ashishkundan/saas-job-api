@@ -1,10 +1,9 @@
-services:
-  - type: pserv
-    name: saas-job-api-db
-    runtime: postgresql
+databases:
+  - name: saas-job-api-db
     plan: standard
     region: oregon
 
+services:
   - type: web
     name: saas-job-api
     runtime: python
@@ -19,14 +18,13 @@ services:
       - key: PYTHON_VERSION
         value: "3.11.9"
       - key: SAAS_JOB_API_DATABASE_URL
-        fromService:
+        fromDatabase:
           name: saas-job-api-db
-          type: pserv
-          envVarKey: DATABASE_URL
+          property: connectionString
       - key: SAAS_JOB_API_ADMIN_TOKEN
-        fromSecret: saas_job_api_admin_token
+        sync: false
       - key: SAAS_JOB_API_GATEWAY_TOKENS_JSON
-        fromSecret: saas_job_api_gateway_tokens_json
+        sync: false
       - key: SAAS_JOB_API_LOG_LEVEL
         value: "INFO"
       - key: SAAS_JOB_API_RESERVATION_TTL_SECONDS
