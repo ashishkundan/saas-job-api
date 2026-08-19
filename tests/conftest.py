@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -33,6 +34,7 @@ def make_test_settings(**overrides: object) -> Settings:
         "gateway_tokens_json": json.dumps({DEV_TOKEN: DEV_GATEWAY_ID}),
         "admin_token": ADMIN_TOKEN,
         "reservation_ttl_seconds": 60.0,
+        "database_url": os.environ.get("SAAS_JOB_API_TEST_DATABASE_URL"),
     }
     defaults.update(overrides)
     return Settings(**defaults)

@@ -8,6 +8,7 @@ It is not part of TDD §9.2; see saas-job-api/README.md "Known contract gaps".
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -16,12 +17,13 @@ from ..auth import authenticated_gateway, bind_gateway_id, get_settings
 from ..errors import BadRequestError
 from ..models.poll import Job, PollRequest, PollResponse
 from ..models.received import ReceivedRequest, ReceivedResponse
-from ..store import JobStore
+from ..store_base import JobStoreBase
 
 router = APIRouter(prefix="/gateway/v1/jobs", tags=["gateway"])
+logger = logging.getLogger(__name__)
 
 
-def get_store(request: Request) -> JobStore:
+def get_store(request: Request) -> JobStoreBase:
     return request.app.state.store
 
 
@@ -29,17 +31,27 @@ def get_store(request: Request) -> JobStore:
 async def poll_jobs(
     body: PollRequest,
     request: Request,
-    store: JobStore = Depends(get_store),
+    store: JobStoreBase = Depends(get_store),
     gateway_id: str = Depends(authenticated_gateway),
 ):
     bind_gateway_id(body.gateway_id, gateway_id)
 
     fault = await store.take_fault()
     if fault is not None:
+        status_code, retry_after = fault
         headers = {}
-        if fault.retry_after_seconds is not None:
-            headers["Retry-After"] = str(int(fault.retry_after_seconds))
-        return Response(status_code=fault.status_code, headers=headers)
+        if retry_after is not None:
+            headers["Retry-After"] = str(int(retry_after))
+        logger.info(
+            "poll_fault_injected",
+            extra={
+                "event": "poll_fault_injected",
+                "gateway_id": gateway_id,
+                "status_code": status_code,
+                "retry_after_seconds": retry_after,
+            },
+        )
+        return Response(status_code=status_code, headers=headers)
 
     settings = get_settings(request)
     now = store.clock.now()
@@ -52,7 +64,24 @@ async def poll_jobs(
     )
 
     if not chosen:
+        logger.info(
+            "poll_no_jobs",
+            extra={
+                "event": "poll_no_jobs",
+                "gateway_id": gateway_id,
+            },
+        )
         return Response(status_code=204)
+
+    logger.info(
+        "job_claimed",
+        extra={
+            "event": "job_claimed",
+            "gateway_id": gateway_id,
+            "count": len(chosen),
+            "job_ids": [j.job_id for j in chosen],
+        },
+    )
 
     jobs = [
         Job(
@@ -84,7 +113,7 @@ async def poll_jobs(
 async def _acknowledge(
     job_id: str,
     body: ReceivedRequest,
-    store: JobStore,
+    store: JobStoreBase,
     gateway_id: str,
 ) -> ReceivedResponse:
     bind_gateway_id(body.gateway_id, gateway_id)
@@ -96,6 +125,16 @@ async def _acknowledge(
         payload_hash=body.payload_hash,
         local_record_version=body.local_record_version,
     )
+    logger.info(
+        "job_acknowledged",
+        extra={
+            "event": "job_acknowledged",
+            "job_id": job_id,
+            "gateway_id": gateway_id,
+            "job_type": job.job_type,
+            "delivery_attempts": job.delivery_attempts,
+        },
+    )
     return ReceivedResponse(jobId=job.job_id)
 
 
@@ -103,7 +142,7 @@ async def _acknowledge(
 async def acknowledge_received(
     job_id: str,
     body: ReceivedRequest,
-    store: JobStore = Depends(get_store),
+    store: JobStoreBase = Depends(get_store),
     gateway_id: str = Depends(authenticated_gateway),
 ) -> ReceivedResponse:
     return await _acknowledge(job_id, body, store, gateway_id)
@@ -112,7 +151,7 @@ async def acknowledge_received(
 @router.post("/received", response_model=ReceivedResponse)
 async def acknowledge_received_legacy_alias(
     body: ReceivedRequest,
-    store: JobStore = Depends(get_store),
+    store: JobStoreBase = Depends(get_store),
     gateway_id: str = Depends(authenticated_gateway),
 ) -> ReceivedResponse:
     if body.job_id is None:

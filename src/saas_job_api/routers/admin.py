@@ -14,17 +14,18 @@ from fastapi import APIRouter, Depends, Request
 from ..auth import require_admin_token
 from ..domain import JobRecord
 from ..models.admin import AdminCreateJobRequest, FaultInjectionRequest
-from ..store import JobStore, new_correlation_id, new_job_id
+from ..store import new_correlation_id, new_job_id
+from ..store_base import JobStoreBase
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin_token)])
 
 
-def get_store(request: Request) -> JobStore:
+def get_store(request: Request) -> JobStoreBase:
     return request.app.state.store
 
 
 @router.post("/jobs")
-async def create_job(body: AdminCreateJobRequest, store: JobStore = Depends(get_store)):
+async def create_job(body: AdminCreateJobRequest, store: JobStoreBase = Depends(get_store)):
     record = JobRecord(
         job_id=body.job_id or new_job_id(),
         job_type=body.job_type,
@@ -41,7 +42,7 @@ async def create_job(body: AdminCreateJobRequest, store: JobStore = Depends(get_
 
 
 @router.get("/jobs")
-async def list_jobs(store: JobStore = Depends(get_store)):
+async def list_jobs(store: JobStoreBase = Depends(get_store)):
     records = await store.list_all()
     return [
         {
@@ -58,12 +59,12 @@ async def list_jobs(store: JobStore = Depends(get_store)):
 
 
 @router.post("/reset")
-async def reset(store: JobStore = Depends(get_store)):
+async def reset(store: JobStoreBase = Depends(get_store)):
     await store.reset()
     return {"status": "reset"}
 
 
 @router.post("/faults")
-async def set_fault(body: FaultInjectionRequest, store: JobStore = Depends(get_store)):
+async def set_fault(body: FaultInjectionRequest, store: JobStoreBase = Depends(get_store)):
     await store.set_fault(body.next_poll_status, body.retry_after_seconds)
     return {"status": "armed", "nextPollStatus": body.next_poll_status}

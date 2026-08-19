@@ -1,0 +1,55 @@
+services:
+  - type: pserv
+    name: saas-job-api-db
+    runtime: postgresql
+    ipAddress: private
+    plan: standard
+    region: oregon
+    databaseName: saas_job_api
+    user: saas_user
+    postgresMajorVersion: "15"
+
+  - type: web
+    name: saas-job-api
+    runtime: python
+    plan: standard
+    region: oregon
+    buildCommand: pip install -e .
+    startCommand: uvicorn saas_job_api.main:app --host 0.0.0.0 --port $PORT
+    numInstances: 2
+    autoscaling:
+      enabled: true
+      minInstances: 2
+      maxInstances: 10
+      targetMemoryPercent: 70
+      targetCPUPercent: 75
+    healthCheckPath: /healthz
+    healthCheckInterval: 10
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+
+      - key: SAAS_JOB_API_DATABASE_URL
+        fromService:
+          name: saas-job-api-db
+          type: pserv
+          envVarKey: DATABASE_URL
+
+      - key: SAAS_JOB_API_ADMIN_TOKEN
+        sync: false
+
+      - key: SAAS_JOB_API_GATEWAY_TOKENS_JSON
+        sync: false
+
+      - key: SAAS_JOB_API_LOG_LEVEL
+        value: "INFO"
+
+      - key: SAAS_JOB_API_RESERVATION_TTL_SECONDS
+        value: "60.0"
+
+      - key: SAAS_JOB_API_DEFAULT_MAX_JOBS
+        value: "20"
+
+      - key: SAAS_JOB_API_DEFAULT_POLL_AFTER_MS
+        value: "2000"

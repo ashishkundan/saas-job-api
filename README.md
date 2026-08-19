@@ -164,3 +164,74 @@ pytest
 from the parent repo's `src/` (added to `sys.path` in `conftest.py`) and is
 skipped automatically if that import fails, e.g. when this directory is
 copied out on its own.
+
+
+## Production Deployment (Render)
+
+This implementation supports production deployment on [Render.com](https://render.com) with persistent PostgreSQL storage and horizontal scaling.
+
+### Prerequisites
+
+- Render account (free tier available)
+- GitHub repository (https://github.com/ashishkundan/saas-job-api)
+- Production-ready secrets (admin token, gateway tokens)
+
+### Deploy from render.yaml
+
+1. **Push to GitHub** (if not already done):
+   ```bash
+   git push origin main
+   ```
+
+2. **Connect to Render**:
+   - Go to https://dashboard.render.com
+   - Click "New +" → "Blueprint"
+   - Select your GitHub repository
+   - Select `render.yaml` in this repo
+
+3. **Set environment variables** (in Render dashboard after creating the blueprint):
+   - `SAAS_JOB_API_ADMIN_TOKEN` — Generate a strong random token (e.g., `$(python -c 'import secrets; print(secrets.token_urlsafe(32))')`)
+   - `SAAS_JOB_API_GATEWAY_TOKENS_JSON` — JSON map of tokens to gateway IDs, e.g. `{"your-token":"gw_prod_1"}`
+
+4. **Deploy**:
+   - Click "Deploy blueprint"
+   - Render will automatically:
+     - Create a managed PostgreSQL 15 database
+     - Spin up 2 Web Service instances (auto-scaling 2-10)
+     - Run database migrations on startup
+     - Sync job state across all instances
+
+### Architecture
+
+- **Database**: Render-managed PostgreSQL 15 (auto-backups, HA failover)
+- **API instances**: 2-10 Web Services (auto-scaling on CPU/memory)
+- **Network**: Private network between API and DB (no internet exposure)
+- **Logging**: Structured JSON logs (visible in Render dashboard)
+
+### Monitoring
+
+Jobs are persisted in the PostgreSQL `jobs` table. View job state via:
+```bash
+curl https://your-render-app.onrender.com/admin/jobs \
+  -H "X-Admin-Token: $YOUR_ADMIN_TOKEN"
+```
+
+JSON structured logs appear in the Render dashboard with fields:
+- `event`: "job_claimed", "job_acknowledged", "poll_no_jobs", "poll_fault_injected"
+- `gateway_id`: Requesting gateway ID
+- `job_id`: Job ID(s) affected
+- `count`: Number of jobs (for claims)
+
+### Troubleshooting
+
+**"database connection failed"**: Verify `SAAS_JOB_API_DATABASE_URL` is set correctly (Render sets this automatically from the PostgreSQL service).
+
+**"job not found"**: Jobs persist across restarts only if PostgreSQL service stays alive. Render's managed Postgres has auto-failover; manually deleting the service will lose all jobs.
+
+**Horizontal scaling**: The database enforces atomicity via transactions (PostgreSQL ACID). Multiple instances safely claim, reserve, and acknowledge jobs without duplication. No manual coordination needed.
+
+### Cost
+
+- Render Free/Starter tier: $0-7/month (includes 1 free PostgreSQL instance)
+- Standard tier: ~$50-200/month depending on scale
+- See [Render pricing](https://render.com/pricing) for details

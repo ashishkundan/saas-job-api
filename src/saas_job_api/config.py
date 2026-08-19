@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     default_max_jobs: int = 20
     default_poll_after_ms: int = 2000
     seed_file: str | None = None
+    
+    # PostgreSQL connection URL (None = use in-memory store for dev)
+    database_url: str | None = None
+    
+    # Logging level
+    log_level: str = "INFO"
 
     @property
     def gateway_tokens(self) -> dict[str, str]:

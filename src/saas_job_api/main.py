@@ -12,11 +12,11 @@ from .config import Settings, settings as default_settings
 from .domain import JobRecord
 from .errors import install_exception_handlers
 from .routers import admin, gateway
-from .store import JobStore, new_correlation_id, new_job_id
+from .store import create_store, close_store, new_job_id, new_correlation_id
 from .time_provider import Clock, RealClock
 
 
-def _load_seed_file(store: JobStore, path: str) -> None:
+async def _load_seed_file(store, path: str) -> None:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     for item in data:
         record = JobRecord(
@@ -30,17 +30,26 @@ def _load_seed_file(store: JobStore, path: str) -> None:
             max_attempts=item.get("maxAttempts", 8),
             trace_id=item.get("traceId"),
         )
-        store._jobs[record.job_id] = record  # startup-only bulk load, bypasses seed()'s lock/await
+        await store.seed(record)
 
 
 def create_app(*, settings: Settings | None = None, clock: Clock | None = None) -> FastAPI:
     cfg = settings or default_settings
     app = FastAPI(title="SaaS Job API (reference implementation)")
     app.state.settings = cfg
-    app.state.store = JobStore(clock=clock or RealClock(), reservation_ttl_seconds=cfg.reservation_ttl_seconds)
+    app.state.clock = clock or RealClock()
+    app.state.store = None  # Will be initialized in startup event
 
-    if cfg.seed_file:
-        _load_seed_file(app.state.store, cfg.seed_file)
+    @app.on_event("startup")
+    async def startup_event():
+        app.state.store = await create_store(cfg, clock=app.state.clock)
+        if cfg.seed_file:
+            await _load_seed_file(app.state.store, cfg.seed_file)
+
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        if app.state.store:
+            await close_store(app.state.store)
 
     install_exception_handlers(app)
     app.include_router(gateway.router)
