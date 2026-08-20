@@ -6,7 +6,7 @@ import pytest
 
 from saas_job_api.domain import JobRecord, JobState
 from saas_job_api.errors import ConflictError
-from saas_job_api.store import JobStore
+from saas_job_api.store import MemoryJobStore
 from saas_job_api.time_provider import FakeClock
 
 
@@ -30,11 +30,11 @@ def clock() -> FakeClock:
 
 
 @pytest.fixture
-def store(clock: FakeClock) -> JobStore:
-    return JobStore(clock=clock, reservation_ttl_seconds=60.0)
+def store(clock: FakeClock) -> MemoryJobStore:
+    return MemoryJobStore(clock=clock, reservation_ttl_seconds=60.0)
 
 
-async def test_claim_reserves_with_ttl(store: JobStore, clock: FakeClock):
+async def test_claim_reserves_with_ttl(store: MemoryJobStore, clock: FakeClock):
     await store.seed(make_record("job_1"))
 
     [claimed] = await store.claim(
@@ -47,7 +47,7 @@ async def test_claim_reserves_with_ttl(store: JobStore, clock: FakeClock):
     assert claimed.receipt_token
 
 
-async def test_reserved_job_excluded_before_expiry(store: JobStore):
+async def test_reserved_job_excluded_before_expiry(store: MemoryJobStore):
     await store.seed(make_record("job_1"))
     await store.claim(gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None)
 
@@ -58,7 +58,7 @@ async def test_reserved_job_excluded_before_expiry(store: JobStore):
     assert second_claim == []
 
 
-async def test_expired_reservation_is_redelivered_with_new_token(store: JobStore, clock: FakeClock):
+async def test_expired_reservation_is_redelivered_with_new_token(store: MemoryJobStore, clock: FakeClock):
     await store.seed(make_record("job_1"))
     [first] = await store.claim(
         gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
@@ -76,7 +76,7 @@ async def test_expired_reservation_is_redelivered_with_new_token(store: JobStore
     assert redelivered.delivery_attempts == 2
 
 
-async def test_ack_with_stale_token_after_redelivery_is_conflict(store: JobStore, clock: FakeClock):
+async def test_ack_with_stale_token_after_redelivery_is_conflict(store: MemoryJobStore, clock: FakeClock):
     await store.seed(make_record("job_1"))
     [first] = await store.claim(
         gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
@@ -97,7 +97,7 @@ async def test_ack_with_stale_token_after_redelivery_is_conflict(store: JobStore
         )
 
 
-async def test_ack_with_current_token_succeeds_and_is_idempotent(store: JobStore, clock: FakeClock):
+async def test_ack_with_current_token_succeeds_and_is_idempotent(store: MemoryJobStore, clock: FakeClock):
     await store.seed(make_record("job_1"))
     [claimed] = await store.claim(
         gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
@@ -125,7 +125,7 @@ async def test_ack_with_current_token_succeeds_and_is_idempotent(store: JobStore
     assert second_ack.state == JobState.ACKNOWLEDGED
 
 
-async def test_ack_unknown_job_is_conflict(store: JobStore, clock: FakeClock):
+async def test_ack_unknown_job_is_conflict(store: MemoryJobStore, clock: FakeClock):
     with pytest.raises(ConflictError):
         await store.acknowledge(
             job_id="does_not_exist",
@@ -137,7 +137,7 @@ async def test_ack_unknown_job_is_conflict(store: JobStore, clock: FakeClock):
         )
 
 
-async def test_ack_wrong_gateway_is_conflict(store: JobStore, clock: FakeClock):
+async def test_ack_wrong_gateway_is_conflict(store: MemoryJobStore, clock: FakeClock):
     await store.seed(make_record("job_1"))
     [claimed] = await store.claim(
         gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
@@ -154,7 +154,7 @@ async def test_ack_wrong_gateway_is_conflict(store: JobStore, clock: FakeClock):
         )
 
 
-async def test_job_type_and_manifest_version_filtering(store: JobStore):
+async def test_job_type_and_manifest_version_filtering(store: MemoryJobStore):
     tls = make_record("job_tls")
     other = make_record("job_other")
     other.job_type = "WINDOWS_CERT_SCAN"
@@ -172,7 +172,7 @@ async def test_job_type_and_manifest_version_filtering(store: JobStore):
     assert [j.job_id for j in claimed] == ["job_tls"]
 
 
-async def test_max_jobs_and_dispatch_slots_bound_the_batch(store: JobStore):
+async def test_max_jobs_and_dispatch_slots_bound_the_batch(store: MemoryJobStore):
     for i in range(5):
         await store.seed(make_record(f"job_{i}"))
 
@@ -183,7 +183,7 @@ async def test_max_jobs_and_dispatch_slots_bound_the_batch(store: JobStore):
     assert len(claimed) == 2
 
 
-async def test_priority_then_scheduled_at_ordering(store: JobStore):
+async def test_priority_then_scheduled_at_ordering(store: MemoryJobStore):
     now = datetime.now(timezone.utc)
     await store.seed(make_record("low", priority=10, scheduled_at=now))
     await store.seed(make_record("high", priority=90, scheduled_at=now))
