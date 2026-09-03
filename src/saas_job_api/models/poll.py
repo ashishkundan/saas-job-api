@@ -9,6 +9,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class PollRequest(BaseModel):
+    # extra="ignore" is what let older clients send the now-DEPRECATED legacy
+    # capacity/batchSize/requestedAt fields harmlessly alongside the strict
+    # TDD §9.1 fields below (Phase 0.1, 2026-09-04: the current client no
+    # longer sends them). Kept only for any already-deployed older client.
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
     request_id: str | None = Field(default=None, alias="requestId")

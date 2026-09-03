@@ -11,13 +11,16 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 class ReceivedRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
-    # Only required/used by the legacy flat-body alias route (POST /gateway/v1/jobs/received),
-    # since the current client always sends jobId in the body, never as a path parameter.
+    # DEPRECATED (Phase 0.1, 2026-09-04): only used by the deprecated legacy
+    # flat-body alias route (POST /gateway/v1/jobs/received). The current
+    # client always path-templates {jobId} and never sends it in the body.
     job_id: str | None = Field(default=None, alias="jobId")
     gateway_id: str | None = Field(default=None, alias="gatewayId")
     receipt_token: str = Field(alias="receiptToken")
-    # Accepts "acknowledgedAt" too: the current client sends that name instead of
-    # the TDD's "receivedAt". See saas-job-api/README.md "Known contract gaps".
+    # DEPRECATED (Phase 0.1, 2026-09-04): "acknowledgedAt" was accepted because
+    # the older client sent that name instead of the TDD's "receivedAt". The
+    # current client sends only "receivedAt"; this alias is kept for any
+    # already-deployed older client and is scheduled for removal in Phase 4.
     received_at: datetime = Field(validation_alias=AliasChoices("receivedAt", "acknowledgedAt"))
     payload_hash: str | None = Field(default=None, alias="payloadHash")
     local_record_version: int | None = Field(default=None, alias="localRecordVersion")

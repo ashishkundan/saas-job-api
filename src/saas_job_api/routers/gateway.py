@@ -4,6 +4,12 @@ POST /gateway/v1/jobs/received (flat body, no path jobId) exists only because
 the parent repo's current HttpJobSource.acknowledge_received() always POSTs to
 a single flat URL with jobId in the body -- it never path-templates {jobId}.
 It is not part of TDD §9.2; see saas-job-api/README.md "Known contract gaps".
+
+DEPRECATED (Gateway VM implementation plan, Phase 0.1, 2026-09-04): the
+client (HttpJobSource) now always calls the path-style /{job_id}/received
+route and no longer falls back to this flat-body alias on 404/405. This
+route is kept only for any already-deployed older client and is scheduled
+for removal in Phase 4 once traffic confirms zero use.
 """
 
 from __future__ import annotations
@@ -148,7 +154,7 @@ async def acknowledge_received(
     return await _acknowledge(job_id, body, store, gateway_id)
 
 
-@router.post("/received", response_model=ReceivedResponse)
+@router.post("/received", response_model=ReceivedResponse, deprecated=True)
 async def acknowledge_received_legacy_alias(
     body: ReceivedRequest,
     store: JobStoreBase = Depends(get_store),
