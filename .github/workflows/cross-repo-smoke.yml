@@ -1,0 +1,54 @@
+name: Cross-repo smoke test
+
+# Phase 0.3 (Gateway VM implementation plan): proves the real HttpJobSource
+# from certificate-discovery-engine can drive a live instance of this server
+# through one poll -> claim -> received cycle, not just against fakes.
+# Runs nightly/manually rather than on every push/PR, deliberately - it
+# depends on another repo's current branch state, which is a different
+# concern than gating a single PR in *this* repo (see ci.yml for that).
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    # Runs against the in-memory store deliberately - this job verifies
+    # cross-repo wire compatibility, not store correctness (ci.yml's
+    # dedicated Postgres run already covers that).
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout saas-job-api
+        uses: actions/checkout@v4
+        with:
+          path: saas-job-api
+
+      - name: Checkout certificate-discovery-engine
+        uses: actions/checkout@v4
+        with:
+          repository: ashishkundan/certificate-discovery-engine
+          # TODO: the Gateway VM work (including the Phase 0.1 canonicalized
+          # HttpJobSource this test exercises) lives on Core-plugin, not main
+          # - main is currently behind it. Switch this to the default branch
+          # once Core-plugin merges to main.
+          ref: Core-plugin
+          path: certificate-discovery-engine
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install certificate-discovery-engine
+        working-directory: certificate-discovery-engine
+        run: pip install -e ".[dev]"
+
+      - name: Install saas-job-api
+        working-directory: saas-job-api
+        run: pip install -e ".[dev]"
+
+      - name: Run cross-repo smoke test
+        working-directory: saas-job-api
+        run: pytest tests/test_e2e_with_existing_client.py -v

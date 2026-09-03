@@ -1,13 +1,23 @@
 """Opt-in verification that the parent repo's real Gateway VM poller client can
 talk to a live instance of this server. Skipped automatically if the parent
-package isn't importable (see conftest.py's sys.path shim).
+package isn't importable (see conftest.py's sys.path shim) -- wired into CI
+as the Phase 0.3 cross-repo smoke test (.github/workflows/cross-repo-smoke.yml),
+which checks out certificate-discovery-engine as a sibling so this actually
+runs instead of always skipping.
+
+As of Phase 0.1 (2026-09-04), HttpJobSource's default (no received_url
+override) correctly path-templates to POST /gateway/v1/jobs/{jobId}/received
+-- the strict TDD section 9.2 route -- so this test now exercises that
+route directly, proving the canonicalized contract works end-to-end against
+a real server, not just against fakes. The deprecated flat-body legacy alias
+route is intentionally not exercised here; it's scheduled for removal in
+Phase 4.
 
 Deliberately NOT exercised here (real contract surface the current client
 never reaches -- see README.md "Known contract gaps"): 204-empty-poll,
 requestId/gatewayId/supportedJobTypes/supportedManifestVersions/
 availableDispatchSlots/clientTime on the poll request, gatewayId/payloadHash/
-localRecordVersion on the ack, reservationUntil/serverTime, and the
-path-templated /received route (the client can only reach the legacy alias).
+localRecordVersion on the ack, reservationUntil/serverTime.
 """
 
 from __future__ import annotations
@@ -88,10 +98,8 @@ async def test_real_client_can_poll_and_acknowledge(live_server):
 
     source = HttpJobSource(
         poll_url=f"{BASE_URL}/gateway/v1/jobs/poll",
-        # HttpJobSource's default received_url is f"{poll_url.rstrip('/')}/received", i.e.
-        # ".../jobs/poll/received" -- it does not strip the trailing "/poll" segment, so it
-        # must be pointed explicitly at the legacy alias route to actually land anywhere.
-        received_url=f"{BASE_URL}/gateway/v1/jobs/received",
+        # No received_url override: the default derives the strict path-style
+        # route (.../jobs/{job_id}/received) directly from poll_url.
         api_token=DEV_TOKEN,
     )
 
