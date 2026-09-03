@@ -40,12 +40,28 @@ def do_run_migrations(connection) -> None:
         context.run_migrations()
 
 
+def _async_sqlalchemy_url(database_url: str | None) -> str:
+    """Normalize a plain postgresql:// URL (e.g. Render's connection string,
+    or asyncpg's own DSN format used by db.py) into the asyncpg SQLAlchemy
+    dialect create_async_engine requires. Without this, a plain postgresql://
+    URL makes SQLAlchemy pick the sync psycopg2 driver (not installed) and
+    migrations fail immediately - this was previously untested against the
+    real connection string format used in production."""
+    if database_url is None:
+        return "sqlite+aiosqlite:///:memory:"
+    if database_url.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + database_url[len("postgresql://"):]
+    if database_url.startswith("postgres://"):
+        return "postgresql+asyncpg://" + database_url[len("postgres://"):]
+    return database_url
+
+
 async def run_migrations_online() -> None:
     """Run migrations in 'online' mode (with live DB connection)."""
     from saas_job_api.config import settings
 
     configuration = config.get_section(config.config_ini_section)
-    configuration["sqlalchemy.url"] = settings.database_url or "sqlite+aiosqlite:///:memory:"
+    configuration["sqlalchemy.url"] = _async_sqlalchemy_url(settings.database_url)
 
     connectable = create_async_engine(
         configuration["sqlalchemy.url"],
