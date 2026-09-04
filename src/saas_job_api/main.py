@@ -14,13 +14,15 @@ from .certs import CertificateAuthority, generate_ca
 from .config import Settings, settings as default_settings
 from .domain import JobRecord
 from .errors import install_exception_handlers
+from .health_store_memory import MemoryHealthStore
+from .health_store_postgres import PostgresHealthStore
 from .identity import AdminPrincipal, AdminRole
 from .passwords import hash_password
 from .rbac_store_memory import MemoryRbacStore
 from .rbac_store_postgres import PostgresRbacStore
 from .registration_store_memory import MemoryRegistrationStore
 from .registration_store_postgres import PostgresRegistrationStore
-from .routers import admin, admin_auth, gateway, registration
+from .routers import admin, admin_auth, gateway, heartbeat, registration
 from .store import create_store, close_store, new_job_id, new_correlation_id
 from .time_provider import Clock, RealClock
 
@@ -94,9 +96,11 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
             pool = get_pool()
             app.state.registration_store = PostgresRegistrationStore(pool)
             app.state.rbac_store = PostgresRbacStore(pool)
+            app.state.health_store = PostgresHealthStore(pool)
         else:
             app.state.registration_store = MemoryRegistrationStore()
             app.state.rbac_store = MemoryRbacStore()
+            app.state.health_store = MemoryHealthStore()
 
         app.state.ca = _build_certificate_authority(cfg)
         await _bootstrap_admin_principal(app.state.rbac_store, cfg)
@@ -112,6 +116,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
     app.include_router(registration.admin_router)
     app.include_router(registration.gateway_router)
     app.include_router(admin_auth.router)
+    app.include_router(heartbeat.router)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

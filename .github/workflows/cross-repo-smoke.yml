@@ -5,7 +5,9 @@ name: Cross-repo smoke test
 # through one poll -> claim -> received cycle, not just against fakes.
 # Phase 1.1b added a second test: the real RegistrationAgent registering a
 # gateway end-to-end, including a certificate that actually chains to this
-# server's CA.
+# server's CA. Phase 1.4 added a third: the real GatewayHealthManager +
+# HttpHeartbeatSink sending a heartbeat and the SaaS side actually storing
+# it.
 # Runs nightly/manually rather than on every push/PR, deliberately - it
 # depends on another repo's current branch state, which is a different
 # concern than gating a single PR in *this* repo (see ci.yml for that).
@@ -54,4 +56,4 @@ jobs:
 
       - name: Run cross-repo smoke tests
         working-directory: saas-job-api
-        run: pytest tests/test_e2e_with_existing_client.py tests/test_e2e_gateway_registration.py -v
+        run: pytest tests/test_e2e_with_existing_client.py tests/test_e2e_gateway_registration.py tests/test_e2e_gateway_heartbeat.py -v

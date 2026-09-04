@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     bootstrap_admin_username: str | None = None
     bootstrap_admin_password: str | None = None
 
+    # Phase 1.4: GatewayStatus derivation thresholds (settings, not
+    # hard-coded, per the doc's explicit guidance). Assumes a ~60s Gateway
+    # heartbeat interval by default: one missed beat -> DEGRADED, five
+    # missed -> UNREACHABLE, thirty minutes sustained -> FAILED.
+    gateway_degraded_after_seconds: float = 90.0
+    gateway_unreachable_after_seconds: float = 300.0
+    gateway_failed_after_seconds: float = 1_800.0
+
     @property
     def gateway_tokens(self) -> dict[str, str]:
         return json.loads(self.gateway_tokens_json)
