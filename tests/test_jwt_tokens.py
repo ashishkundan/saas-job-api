@@ -44,6 +44,24 @@ def test_verify_rejects_malformed_token() -> None:
         verify_token("not-a-jwt", secret="s3cret")
 
 
+def test_issue_and_verify_round_trip_carries_tenant_id() -> None:
+    token = issue_token(
+        secret="s3cret", subject="principal-1", role="tenant_admin", ttl_seconds=3600, tenant_id="tenant-42"
+    )
+
+    claims = verify_token(token, secret="s3cret")
+
+    assert claims.tenant_id == "tenant-42"
+
+
+def test_tenant_id_defaults_to_none_for_an_unscoped_platform_admin_token() -> None:
+    token = issue_token(secret="s3cret", subject="principal-1", role="platform_admin", ttl_seconds=3600)
+
+    claims = verify_token(token, secret="s3cret")
+
+    assert claims.tenant_id is None
+
+
 def test_role_privilege_escalation_via_payload_swap_is_rejected() -> None:
     """A tenant_viewer token's payload segment can't be swapped for a
     platform_admin token's payload while keeping the platform_admin token's

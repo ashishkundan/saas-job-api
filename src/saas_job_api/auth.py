@@ -70,11 +70,10 @@ async def authenticated_admin_principal(
 
 
 def require_role(role: AdminRole):
-    """Exact-role dependency factory (no hierarchy yet - platform_admin does
-    not implicitly satisfy a tenant_admin/tenant_viewer requirement). There is
-    only one gated endpoint as of Phase 1.1 (enrollment-token issuance,
-    platform_admin-only); revisit hierarchy once Phase 2.5's tenant-scoped
-    endpoints need it."""
+    """Exact-role dependency factory (no hierarchy - platform_admin does not
+    implicitly satisfy a tenant_admin/tenant_viewer requirement). Used where
+    exactly one role may act, e.g. enrollment-token issuance
+    (platform_admin-only)."""
 
     async def _check(claims: TokenClaims = Depends(authenticated_admin_principal)) -> TokenClaims:
         if claims.role != role.value:
@@ -82,3 +81,33 @@ def require_role(role: AdminRole):
         return claims
 
     return _check
+
+
+def require_any_role(*roles: AdminRole):
+    """Phase 2.5: several roles may act on tenant-scoped endpoints (e.g. both
+    platform_admin and tenant_admin may create a Target), but tenant_viewer
+    may not. Still no hierarchy - callers list every role that should pass,
+    and combine this with require_tenant_access for per-resource scoping."""
+
+    allowed = {role.value for role in roles}
+
+    async def _check(claims: TokenClaims = Depends(authenticated_admin_principal)) -> TokenClaims:
+        if claims.role not in allowed:
+            raise ForbiddenError()
+        return claims
+
+    return _check
+
+
+def require_tenant_access(claims: TokenClaims, resource_tenant_id: str) -> None:
+    """Per-resource tenant scoping (Phase 2.5): platform_admin (unscoped)
+    may access any tenant's Tenant/Target/Schedule resources; tenant_admin/
+    tenant_viewer are confined to the single tenant_id on their own token.
+    Called inline in a router after the resource (or its target tenant_id)
+    is known, rather than as a Depends factory, since the resource's
+    tenant_id usually isn't known until after a store lookup."""
+
+    if claims.role == AdminRole.PLATFORM_ADMIN.value:
+        return
+    if claims.tenant_id != resource_tenant_id:
+        raise ForbiddenError()

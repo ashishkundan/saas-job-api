@@ -17,13 +17,14 @@ class PostgresRbacStore(RbacStoreBase):
         async with self.pool.acquire() as conn:
             try:
                 await conn.execute(
-                    "INSERT INTO admin_principals (principal_id, username, password_hash, role, created_at) "
-                    "VALUES ($1, $2, $3, $4, $5)",
+                    "INSERT INTO admin_principals (principal_id, username, password_hash, role, created_at, tenant_id) "
+                    "VALUES ($1, $2, $3, $4, $5, $6)",
                     principal.principal_id,
                     principal.username,
                     principal.password_hash,
                     principal.role.value,
                     principal.created_at,
+                    principal.tenant_id,
                 )
             except asyncpg.UniqueViolationError:
                 raise ValueError(f"username already exists: {principal.username}")
@@ -40,4 +41,5 @@ class PostgresRbacStore(RbacStoreBase):
             password_hash=row["password_hash"],
             role=AdminRole(row["role"]),
             created_at=row["created_at"],
+            tenant_id=row["tenant_id"],
         )

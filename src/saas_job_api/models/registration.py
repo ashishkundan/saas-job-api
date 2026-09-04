@@ -55,3 +55,4 @@ class AdminLoginResponse(BaseModel):
     token_type: str = Field(default="Bearer", alias="tokenType")
     expires_in: int = Field(alias="expiresIn")
     role: str
+    tenant_id: str | None = Field(default=None, alias="tenantId")

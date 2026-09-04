@@ -35,13 +35,19 @@ class TokenClaims:
     role: str
     issued_at: int
     expires_at: int
+    # None for a platform_admin token (unscoped); set for tenant_admin/
+    # tenant_viewer (Phase 2.5's tenant-scoped resources).
+    tenant_id: str | None = None
 
 
-def issue_token(*, secret: str, subject: str, role: str, ttl_seconds: float) -> str:
+def issue_token(*, secret: str, subject: str, role: str, ttl_seconds: float, tenant_id: str | None = None) -> str:
     now = int(time.time())
     header_b64 = _b64url_encode(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode("utf-8"))
     payload_b64 = _b64url_encode(
-        json.dumps({"sub": subject, "role": role, "iat": now, "exp": now + int(ttl_seconds)}, separators=(",", ":")).encode("utf-8")
+        json.dumps(
+            {"sub": subject, "role": role, "iat": now, "exp": now + int(ttl_seconds), "tid": tenant_id},
+            separators=(",", ":"),
+        ).encode("utf-8")
     )
     signing_input = f"{header_b64}.{payload_b64}"
     signature = hmac.new(secret.encode("utf-8"), signing_input.encode("ascii"), hashlib.sha256).digest()
@@ -81,6 +87,11 @@ def verify_token(token: str, *, secret: str) -> TokenClaims:
             role=payload["role"],
             issued_at=payload["iat"],
             expires_at=payload["exp"],
+            # Absent entirely on a token issued before this field existed -
+            # treat that the same as an explicit null (unscoped is wrong for
+            # a tenant role, but require_tenant_access already rejects a
+            # None tenant_id for anything but platform_admin).
+            tenant_id=payload.get("tid"),
         )
     except KeyError as exc:
         raise InvalidTokenError(f"missing claim: {exc}") from exc

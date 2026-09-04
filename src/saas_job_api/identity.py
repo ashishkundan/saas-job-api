@@ -53,10 +53,16 @@ class GatewayIdentity:
 
 @dataclass(slots=True)
 class AdminPrincipal:
-    """A human/service account authenticating to the admin/platform API."""
+    """A human/service account authenticating to the admin/platform API.
+
+    tenant_id is None for PLATFORM_ADMIN (unscoped - can access any
+    tenant's resources) and required in practice for TENANT_ADMIN/
+    TENANT_VIEWER (Phase 2.5: confines them to their own tenant's Tenant/
+    Target/Schedule resources, enforced by auth.require_tenant_access)."""
 
     principal_id: str
     username: str
     password_hash: str
     role: AdminRole
     created_at: datetime
+    tenant_id: str | None = None

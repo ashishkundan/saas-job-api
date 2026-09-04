@@ -35,9 +35,11 @@ async def login(
         subject=principal.principal_id,
         role=principal.role.value,
         ttl_seconds=settings.jwt_ttl_seconds,
+        tenant_id=principal.tenant_id,
     )
     return AdminLoginResponse(
         accessToken=token,
         expiresIn=int(settings.jwt_ttl_seconds),
         role=principal.role.value,
+        tenantId=principal.tenant_id,
     )

@@ -22,8 +22,14 @@ from .rbac_store_memory import MemoryRbacStore
 from .rbac_store_postgres import PostgresRbacStore
 from .registration_store_memory import MemoryRegistrationStore
 from .registration_store_postgres import PostgresRegistrationStore
-from .routers import admin, admin_auth, gateway, heartbeat, registration
+from .routers import admin, admin_auth, gateway, heartbeat, registration, schedules, targets, tenants
+from .schedule_store_memory import MemoryScheduleStore
+from .schedule_store_postgres import PostgresScheduleStore
 from .store import create_store, close_store, new_job_id, new_correlation_id
+from .target_store_memory import MemoryTargetStore
+from .target_store_postgres import PostgresTargetStore
+from .tenant_store_memory import MemoryTenantStore
+from .tenant_store_postgres import PostgresTenantStore
 from .time_provider import Clock, RealClock
 
 logger = logging.getLogger(__name__)
@@ -97,10 +103,16 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
             app.state.registration_store = PostgresRegistrationStore(pool)
             app.state.rbac_store = PostgresRbacStore(pool)
             app.state.health_store = PostgresHealthStore(pool)
+            app.state.tenant_store = PostgresTenantStore(pool)
+            app.state.target_store = PostgresTargetStore(pool)
+            app.state.schedule_store = PostgresScheduleStore(pool)
         else:
             app.state.registration_store = MemoryRegistrationStore()
             app.state.rbac_store = MemoryRbacStore()
             app.state.health_store = MemoryHealthStore()
+            app.state.tenant_store = MemoryTenantStore()
+            app.state.target_store = MemoryTargetStore()
+            app.state.schedule_store = MemoryScheduleStore()
 
         app.state.ca = _build_certificate_authority(cfg)
         await _bootstrap_admin_principal(app.state.rbac_store, cfg)
@@ -117,6 +129,9 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
     app.include_router(registration.gateway_router)
     app.include_router(admin_auth.router)
     app.include_router(heartbeat.router)
+    app.include_router(tenants.router)
+    app.include_router(targets.router)
+    app.include_router(schedules.router)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
