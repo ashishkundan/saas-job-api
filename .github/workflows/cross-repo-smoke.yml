@@ -3,6 +3,9 @@ name: Cross-repo smoke test
 # Phase 0.3 (Gateway VM implementation plan): proves the real HttpJobSource
 # from certificate-discovery-engine can drive a live instance of this server
 # through one poll -> claim -> received cycle, not just against fakes.
+# Phase 1.1b added a second test: the real RegistrationAgent registering a
+# gateway end-to-end, including a certificate that actually chains to this
+# server's CA.
 # Runs nightly/manually rather than on every push/PR, deliberately - it
 # depends on another repo's current branch state, which is a different
 # concern than gating a single PR in *this* repo (see ci.yml for that).
@@ -49,6 +52,6 @@ jobs:
         working-directory: saas-job-api
         run: pip install -e ".[dev]"
 
-      - name: Run cross-repo smoke test
+      - name: Run cross-repo smoke tests
         working-directory: saas-job-api
-        run: pytest tests/test_e2e_with_existing_client.py -v
+        run: pytest tests/test_e2e_with_existing_client.py tests/test_e2e_gateway_registration.py -v
