@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 from .errors import NotFoundError
 from .tenancy import Schedule
@@ -37,3 +38,13 @@ class MemoryScheduleStore(ScheduleStoreBase):
             if schedule is None or schedule.tenant_id != tenant_id:
                 raise NotFoundError(f"schedule not found: {schedule_id}")
             del self._schedules[schedule_id]
+
+    async def claim_due(self, *, now: datetime, limit: int) -> list[Schedule]:
+        async with self._lock:
+            due = [s for s in self._schedules.values() if s.enabled and s.next_run_at <= now]
+            due.sort(key=lambda s: s.next_run_at)
+            claimed = due[: max(limit, 0)]
+            for schedule in claimed:
+                schedule.last_run_at = now
+                schedule.next_run_at = now + timedelta(seconds=schedule.interval_seconds)
+            return list(claimed)

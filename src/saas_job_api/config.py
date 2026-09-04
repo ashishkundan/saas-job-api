@@ -50,6 +50,20 @@ class Settings(BaseSettings):
     gateway_unreachable_after_seconds: float = 300.0
     gateway_failed_after_seconds: float = 1_800.0
 
+    # Phase 2.5: scheduler_tick.py runs inside every web instance
+    # (render.yaml numInstances: 2) - double-firing is prevented by
+    # ScheduleStoreBase.claim_due()'s SELECT ... FOR UPDATE SKIP LOCKED
+    # claim, not by only one instance running the loop.
+    scheduler_enabled: bool = True
+    scheduler_tick_interval_seconds: float = 30.0
+    # Orphaned-job reissue (Developer Implementation Guide §24 follow-on):
+    # an ACKNOWLEDGED job whose owning gateway has gone UNREACHABLE/FAILED
+    # and has sat that long since acknowledgement with no result is reset
+    # to AVAILABLE - the acknowledging gateway may have been permanently
+    # replaced (a wiped VM re-registers under a brand-new gateway_id, 1.1b)
+    # and would otherwise never report a result for it.
+    orphaned_job_sla_seconds: float = 600.0
+
     @property
     def gateway_tokens(self) -> dict[str, str]:
         return json.loads(self.gateway_tokens_json)

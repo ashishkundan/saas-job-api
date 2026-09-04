@@ -63,3 +63,21 @@ class JobStoreBase(ABC):
     ) -> JobRecord:
         """Acknowledge job receipt. Transitions RESERVED→ACKNOWLEDGED. Raise ConflictError on mismatch."""
         pass
+
+    @abstractmethod
+    async def reissue_orphaned(
+        self, *, now: datetime, unreachable_gateway_ids: set[str], sla_seconds: float
+    ) -> list[JobRecord]:
+        """Reset any ACKNOWLEDGED job whose ack_gateway_id is in
+        unreachable_gateway_ids and whose ack_received_at is at least
+        sla_seconds in the past, back to AVAILABLE - clearing every
+        reservation/ack field so it's indistinguishable from a fresh job
+        (Phase 2.5's orphaned-job reissue rule). The gateway that
+        acknowledged it may have been permanently replaced under a
+        brand-new gateway_id (registration, 1.1b), so nothing else would
+        ever un-stick it. Note: a RESERVED (not yet acknowledged) job
+        already self-heals via the existing reservation_until TTL in
+        claim()'s eligibility check - this method only needs to cover the
+        ACKNOWLEDGED case, which had no timeout at all before this.
+        Returns the now-reset records."""
+        pass

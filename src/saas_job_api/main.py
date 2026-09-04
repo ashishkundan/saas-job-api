@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -17,6 +18,7 @@ from .errors import install_exception_handlers
 from .health_store_memory import MemoryHealthStore
 from .health_store_postgres import PostgresHealthStore
 from .identity import AdminPrincipal, AdminRole
+from .orchestrator.scheduler_tick import start_scheduler_loop
 from .passwords import hash_password
 from .rbac_store_memory import MemoryRbacStore
 from .rbac_store_postgres import PostgresRbacStore
@@ -117,8 +119,30 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
         app.state.ca = _build_certificate_authority(cfg)
         await _bootstrap_admin_principal(app.state.rbac_store, cfg)
 
+        app.state.scheduler_shutdown_event = asyncio.Event()
+        app.state.scheduler_task = None
+        if cfg.scheduler_enabled:
+            app.state.scheduler_task = asyncio.create_task(
+                start_scheduler_loop(
+                    schedule_store=app.state.schedule_store,
+                    target_store=app.state.target_store,
+                    job_store=app.state.store,
+                    health_store=app.state.health_store,
+                    clock=app.state.clock,
+                    shutdown_event=app.state.scheduler_shutdown_event,
+                    interval_seconds=cfg.scheduler_tick_interval_seconds,
+                    orphaned_job_sla_seconds=cfg.orphaned_job_sla_seconds,
+                    gateway_degraded_after_seconds=cfg.gateway_degraded_after_seconds,
+                    gateway_unreachable_after_seconds=cfg.gateway_unreachable_after_seconds,
+                    gateway_failed_after_seconds=cfg.gateway_failed_after_seconds,
+                )
+            )
+
     @app.on_event("shutdown")
     async def shutdown_event():
+        if app.state.scheduler_task is not None:
+            app.state.scheduler_shutdown_event.set()
+            await app.state.scheduler_task
         if app.state.store:
             await close_store(app.state.store)
 

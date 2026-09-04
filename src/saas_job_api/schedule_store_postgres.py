@@ -1,7 +1,8 @@
-"""PostgreSQL-backed Schedule store. CRUD only - see schedule_store_base.py
-for why claim_due() is added alongside scheduler_tick.py instead."""
+"""PostgreSQL-backed Schedule store."""
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta
 
 import asyncpg
 from asyncpg import Pool
@@ -57,6 +58,45 @@ class PostgresScheduleStore(ScheduleStoreBase):
             )
         if result == "DELETE 0":
             raise NotFoundError(f"schedule not found: {schedule_id}")
+
+    async def claim_due(self, *, now: datetime, limit: int) -> list[Schedule]:
+        # FOR UPDATE SKIP LOCKED only holds row locks for the duration of a
+        # transaction - it must be an explicit conn.transaction(), not the
+        # implicit per-statement autocommit asyncpg otherwise uses, or the
+        # lock (and the point of SKIP LOCKED) would be gone before the
+        # UPDATE below could rely on it.
+        claimed: list[Schedule] = []
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                rows = await conn.fetch(
+                    "SELECT * FROM schedules WHERE enabled = true AND next_run_at <= $1 "
+                    "ORDER BY next_run_at LIMIT $2 FOR UPDATE SKIP LOCKED",
+                    now,
+                    limit,
+                )
+                for row in rows:
+                    next_run_at = now + timedelta(seconds=row["interval_seconds"])
+                    await conn.execute(
+                        "UPDATE schedules SET next_run_at = $1, last_run_at = $2 WHERE schedule_id = $3",
+                        next_run_at,
+                        now,
+                        row["schedule_id"],
+                    )
+                    claimed.append(
+                        Schedule(
+                            schedule_id=row["schedule_id"],
+                            tenant_id=row["tenant_id"],
+                            target_id=row["target_id"],
+                            job_type=row["job_type"],
+                            manifest_version=row["manifest_version"],
+                            interval_seconds=row["interval_seconds"],
+                            next_run_at=next_run_at,
+                            created_at=row["created_at"],
+                            enabled=row["enabled"],
+                            last_run_at=now,
+                        )
+                    )
+        return claimed
 
     @staticmethod
     def _row_to_schedule(row) -> Schedule:

@@ -35,6 +35,10 @@ def make_test_settings(**overrides: object) -> Settings:
         "admin_token": ADMIN_TOKEN,
         "reservation_ttl_seconds": 60.0,
         "database_url": os.environ.get("SAAS_JOB_API_TEST_DATABASE_URL"),
+        # Tests that specifically exercise scheduler_tick.py enable this
+        # explicitly; every other test would otherwise spin up an unused
+        # background task per app fixture for no reason.
+        "scheduler_enabled": False,
     }
     defaults.update(overrides)
     return Settings(**defaults)

@@ -21,6 +21,8 @@ from fastapi import APIRouter, Depends, Request, Response
 
 from ..auth import authenticated_gateway, bind_gateway_id, get_settings
 from ..errors import BadRequestError
+from ..health import HealthState, derive_current_status
+from ..health_store_base import HealthStoreBase
 from ..models.poll import Job, PollRequest, PollResponse
 from ..models.received import ReceivedRequest, ReceivedResponse
 from ..store_base import JobStoreBase
@@ -28,9 +30,15 @@ from ..store_base import JobStoreBase
 router = APIRouter(prefix="/gateway/v1/jobs", tags=["gateway"])
 logger = logging.getLogger(__name__)
 
+_HELD_STATUSES = (HealthState.UNREACHABLE, HealthState.FAILED)
+
 
 def get_store(request: Request) -> JobStoreBase:
     return request.app.state.store
+
+
+def get_health_store(request: Request) -> HealthStoreBase:
+    return request.app.state.health_store
 
 
 @router.post("/poll", response_model=None)
@@ -38,6 +46,7 @@ async def poll_jobs(
     body: PollRequest,
     request: Request,
     store: JobStoreBase = Depends(get_store),
+    health_store: HealthStoreBase = Depends(get_health_store),
     gateway_id: str = Depends(authenticated_gateway),
 ):
     bind_gateway_id(body.gateway_id, gateway_id)
@@ -61,6 +70,30 @@ async def poll_jobs(
 
     settings = get_settings(request)
     now = store.clock.now()
+
+    # Developer Implementation Guide §24: a gateway whose own last-reported
+    # health has decayed to UNREACHABLE/FAILED gets no new work - jobs are
+    # held (an empty poll response), not reserved to a gateway that may not
+    # actually be able to run them, even though it's still calling poll.
+    # No GatewayStatus row yet (a gateway that has never sent a heartbeat)
+    # fails open - withholding all jobs from every not-yet-heartbeated
+    # gateway would be a worse default than what this rule actually asks for.
+    gateway_status = await health_store.get(gateway_id)
+    if gateway_status is not None:
+        current_status = derive_current_status(
+            gateway_status,
+            now=now,
+            degraded_after_seconds=settings.gateway_degraded_after_seconds,
+            unreachable_after_seconds=settings.gateway_unreachable_after_seconds,
+            failed_after_seconds=settings.gateway_failed_after_seconds,
+        )
+        if current_status in _HELD_STATUSES:
+            logger.info(
+                "poll_held_unhealthy_gateway",
+                extra={"event": "poll_held_unhealthy_gateway", "gateway_id": gateway_id, "current_status": current_status.value},
+            )
+            return Response(status_code=204)
+
     chosen = await store.claim(
         gateway_id=gateway_id,
         job_types=body.supported_job_types,

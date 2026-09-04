@@ -117,3 +117,26 @@ class MemoryJobStore(JobStoreBase):
             job.ack_payload_hash = payload_hash
             job.ack_local_record_version = local_record_version
             return job
+
+    async def reissue_orphaned(
+        self, *, now: datetime, unreachable_gateway_ids: set[str], sla_seconds: float
+    ) -> list[JobRecord]:
+        async with self._lock:
+            reissued = []
+            for job in self._jobs.values():
+                if (
+                    job.state == JobState.ACKNOWLEDGED
+                    and job.ack_gateway_id in unreachable_gateway_ids
+                    and job.ack_received_at is not None
+                    and (now - job.ack_received_at).total_seconds() >= sla_seconds
+                ):
+                    job.state = JobState.AVAILABLE
+                    job.reserved_by = None
+                    job.reservation_until = None
+                    job.receipt_token = None
+                    job.ack_gateway_id = None
+                    job.ack_received_at = None
+                    job.ack_payload_hash = None
+                    job.ack_local_record_version = None
+                    reissued.append(job)
+            return list(reissued)

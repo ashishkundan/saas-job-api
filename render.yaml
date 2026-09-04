@@ -33,3 +33,7 @@ services:
         value: "20"
       - key: SAAS_JOB_API_DEFAULT_POLL_AFTER_MS
         value: "2000"
+      - key: SAAS_JOB_API_SCHEDULER_ENABLED
+        value: "true"
+      - key: SAAS_JOB_API_SCHEDULER_TICK_INTERVAL_SECONDS
+        value: "30.0"

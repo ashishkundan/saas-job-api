@@ -149,6 +149,38 @@ class PostgresJobStore(JobStoreBase):
                 updated_row = await conn.fetchrow("SELECT * FROM jobs WHERE job_id = $1", job_id)
         return self._row_to_record(updated_row)
 
+    async def reissue_orphaned(
+        self, *, now: datetime, unreachable_gateway_ids: set[str], sla_seconds: float
+    ) -> list[JobRecord]:
+        if not unreachable_gateway_ids:
+            return []
+        threshold = now - timedelta(seconds=sla_seconds)
+
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                rows = await conn.fetch(
+                    "SELECT job_id FROM jobs WHERE state = 'ACKNOWLEDGED' AND ack_gateway_id = ANY($1) "
+                    "AND ack_received_at <= $2 FOR UPDATE",
+                    list(unreachable_gateway_ids),
+                    threshold,
+                )
+                job_ids = [row["job_id"] for row in rows]
+                if job_ids:
+                    await conn.execute(
+                        "UPDATE jobs SET state = 'AVAILABLE', reserved_by = NULL, reservation_until = NULL, "
+                        "receipt_token = NULL, ack_gateway_id = NULL, ack_received_at = NULL, "
+                        "ack_payload_hash = NULL, ack_local_record_version = NULL, updated_at = $2 "
+                        "WHERE job_id = ANY($1)",
+                        job_ids,
+                        datetime.now(tz=None),
+                    )
+
+        if not job_ids:
+            return []
+        async with self.pool.acquire() as conn:
+            updated_rows = await conn.fetch("SELECT * FROM jobs WHERE job_id = ANY($1)", job_ids)
+        return [self._row_to_record(row) for row in updated_rows]
+
     def _row_to_record(self, row: asyncpg.Record) -> JobRecord:
         """Convert database row to JobRecord."""
         return JobRecord(

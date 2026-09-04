@@ -1,15 +1,9 @@
-"""Abstract base class for Schedule storage (Phase 2.5).
-
-CRUD only here - claim_due() (the SELECT ... FOR UPDATE SKIP LOCKED
-operation scheduler_tick.py needs to avoid double-firing across the 2
-render.yaml web instances) is added to these same classes alongside
-scheduler_tick.py itself, since it's scheduling-engine plumbing rather
-than plain resource management.
-"""
+"""Abstract base class for Schedule storage (Phase 2.5)."""
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from .tenancy import Schedule
 
@@ -30,3 +24,17 @@ class ScheduleStoreBase(ABC):
     @abstractmethod
     async def delete(self, tenant_id: str, schedule_id: str) -> None:
         """Remove one schedule. Raise NotFoundError if it doesn't exist for that tenant."""
+
+    @abstractmethod
+    async def claim_due(self, *, now: datetime, limit: int) -> list[Schedule]:
+        """Atomically claim up to `limit` enabled schedules with
+        next_run_at <= now, advancing each claimed schedule's next_run_at
+        to now + interval_seconds and last_run_at to now as part of the
+        same atomic operation - not a separate step. That's what actually
+        prevents scheduler_tick.py from double-firing across the 2
+        render.yaml web instances (confirmed 2026-09-04: SELECT ... FOR
+        UPDATE SKIP LOCKED for the Postgres adapter): a schedule claimed by
+        one caller is no longer due by the time any concurrent caller's
+        claim could see it, rather than relying on a separate "claimed" flag
+        that could itself race. Returns the schedules as claimed, with
+        next_run_at/last_run_at already reflecting the advance."""
