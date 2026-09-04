@@ -11,7 +11,7 @@ import asyncpg
 from asyncpg import Pool
 
 from .domain import JobRecord, JobState
-from .errors import ConflictError
+from .errors import ConflictError, NotFoundError
 from .store_base import JobStoreBase
 from .time_provider import Clock, RealClock
 
@@ -61,6 +61,11 @@ class PostgresJobStore(JobStoreBase):
         async with self.pool.acquire() as conn:
             rows = await conn.fetch("SELECT * FROM jobs ORDER BY created_at DESC")
         return [self._row_to_record(row) for row in rows]
+
+    async def get(self, job_id: str) -> JobRecord | None:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT * FROM jobs WHERE job_id = $1", job_id)
+        return self._row_to_record(row) if row is not None else None
 
     async def set_fault(self, status_code: int, retry_after_seconds: float | None) -> None:
         """Store a transient fault (in-memory, for testing)."""
@@ -180,6 +185,42 @@ class PostgresJobStore(JobStoreBase):
         async with self.pool.acquire() as conn:
             updated_rows = await conn.fetch("SELECT * FROM jobs WHERE job_id = ANY($1)", job_ids)
         return [self._row_to_record(row) for row in updated_rows]
+
+    async def reissue_one(self, *, job_id: str, gateway_id: str, now: datetime) -> JobRecord | None:
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow("SELECT * FROM jobs WHERE job_id = $1 FOR UPDATE", job_id)
+                if row is None or row["state"] != JobState.ACKNOWLEDGED.value or row["ack_gateway_id"] != gateway_id:
+                    return None
+
+                await conn.execute(
+                    "UPDATE jobs SET state = 'AVAILABLE', reserved_by = NULL, reservation_until = NULL, "
+                    "receipt_token = NULL, ack_gateway_id = NULL, ack_received_at = NULL, "
+                    "ack_payload_hash = NULL, ack_local_record_version = NULL, updated_at = $1 WHERE job_id = $2",
+                    now,
+                    job_id,
+                )
+                updated_row = await conn.fetchrow("SELECT * FROM jobs WHERE job_id = $1", job_id)
+        return self._row_to_record(updated_row)
+
+    async def mark_completed(self, *, job_id: str, gateway_id: str, now: datetime) -> JobRecord:
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow("SELECT * FROM jobs WHERE job_id = $1 FOR UPDATE", job_id)
+                if row is None:
+                    raise NotFoundError(f"unknown job: {job_id}")
+                if row["state"] == JobState.COMPLETED.value:
+                    return self._row_to_record(row)
+                if row["ack_gateway_id"] != gateway_id:
+                    raise ConflictError("gateway/job binding mismatch")
+
+                await conn.execute(
+                    "UPDATE jobs SET state = 'COMPLETED', updated_at = $1 WHERE job_id = $2",
+                    now,
+                    job_id,
+                )
+                updated_row = await conn.fetchrow("SELECT * FROM jobs WHERE job_id = $1", job_id)
+        return self._row_to_record(updated_row)
 
     def _row_to_record(self, row: asyncpg.Record) -> JobRecord:
         """Convert database row to JobRecord."""

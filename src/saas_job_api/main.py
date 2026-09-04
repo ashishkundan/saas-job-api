@@ -18,13 +18,15 @@ from .errors import install_exception_handlers
 from .health_store_memory import MemoryHealthStore
 from .health_store_postgres import PostgresHealthStore
 from .identity import AdminPrincipal, AdminRole
+from .inventory_store_memory import MemoryInventoryStore
+from .inventory_store_postgres import PostgresInventoryStore
 from .orchestrator.scheduler_tick import start_scheduler_loop
 from .passwords import hash_password
 from .rbac_store_memory import MemoryRbacStore
 from .rbac_store_postgres import PostgresRbacStore
 from .registration_store_memory import MemoryRegistrationStore
 from .registration_store_postgres import PostgresRegistrationStore
-from .routers import admin, admin_auth, gateway, heartbeat, registration, schedules, targets, tenants
+from .routers import admin, admin_auth, gateway, heartbeat, registration, results, schedules, targets, tenants
 from .schedule_store_memory import MemoryScheduleStore
 from .schedule_store_postgres import PostgresScheduleStore
 from .store import create_store, close_store, new_job_id, new_correlation_id
@@ -108,6 +110,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
             app.state.tenant_store = PostgresTenantStore(pool)
             app.state.target_store = PostgresTargetStore(pool)
             app.state.schedule_store = PostgresScheduleStore(pool)
+            app.state.inventory_store = PostgresInventoryStore(pool)
         else:
             app.state.registration_store = MemoryRegistrationStore()
             app.state.rbac_store = MemoryRbacStore()
@@ -115,6 +118,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
             app.state.tenant_store = MemoryTenantStore()
             app.state.target_store = MemoryTargetStore()
             app.state.schedule_store = MemoryScheduleStore()
+            app.state.inventory_store = MemoryInventoryStore()
 
         app.state.ca = _build_certificate_authority(cfg)
         await _bootstrap_admin_principal(app.state.rbac_store, cfg)
@@ -156,6 +160,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
     app.include_router(tenants.router)
     app.include_router(targets.router)
     app.include_router(schedules.router)
+    app.include_router(results.router)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

@@ -28,6 +28,13 @@ class JobStoreBase(ABC):
         pass
 
     @abstractmethod
+    async def get(self, job_id: str) -> JobRecord | None:
+        """Look up one job by id, or None if it doesn't exist (Phase 2.6 -
+        the results/interrupted routers need a job's payload, for its
+        tenant_id/target_id, before recording anything against it)."""
+        pass
+
+    @abstractmethod
     async def set_fault(self, status_code: int, retry_after_seconds: float | None) -> None:
         """Inject a transient fault for the next poll (dev-only testing)."""
         pass
@@ -80,4 +87,28 @@ class JobStoreBase(ABC):
         claim()'s eligibility check - this method only needs to cover the
         ACKNOWLEDGED case, which had no timeout at all before this.
         Returns the now-reset records."""
+        pass
+
+    @abstractmethod
+    async def reissue_one(self, *, job_id: str, gateway_id: str, now: datetime) -> JobRecord | None:
+        """Immediately reset one ACKNOWLEDGED job back to AVAILABLE, without
+        waiting for reissue_orphaned()'s SLA timer - used when the Gateway
+        itself reports (POST /gateway/v1/jobs/{jobId}/interrupted, 2.6)
+        that this specific job was RUNNING when its process restarted and
+        its outcome is unknown, a stronger positive signal than mere
+        gateway unreachability. A no-op (returns None) if the job doesn't
+        exist, isn't ACKNOWLEDGED, or wasn't acknowledged by this
+        gateway_id - this is a best-effort notification, not a strict
+        contract the Gateway must get exactly right."""
+        pass
+
+    @abstractmethod
+    async def mark_completed(self, *, job_id: str, gateway_id: str, now: datetime) -> JobRecord:
+        """Transition an ACKNOWLEDGED job to COMPLETED once its result has
+        been durably recorded (Phase 2.6). Idempotent: calling this again
+        for an already-COMPLETED job is a no-op, matching the results
+        endpoint's own dedupe semantics - a retried submission must be
+        able to call this again safely. Raises ConflictError if gateway_id
+        doesn't match the job's ack_gateway_id (mirrors acknowledge()'s
+        own binding check), or NotFoundError for an unknown job_id."""
         pass

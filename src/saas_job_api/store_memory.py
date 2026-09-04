@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from .domain import JobRecord, JobState
-from .errors import ConflictError
+from .errors import ConflictError, NotFoundError
 from .store_base import JobStoreBase
 from .time_provider import Clock, RealClock
 
@@ -45,6 +45,10 @@ class MemoryJobStore(JobStoreBase):
     async def list_all(self) -> list[JobRecord]:
         async with self._lock:
             return list(self._jobs.values())
+
+    async def get(self, job_id: str) -> JobRecord | None:
+        async with self._lock:
+            return self._jobs.get(job_id)
 
     async def set_fault(self, status_code: int, retry_after_seconds: float | None) -> None:
         async with self._lock:
@@ -140,3 +144,30 @@ class MemoryJobStore(JobStoreBase):
                     job.ack_local_record_version = None
                     reissued.append(job)
             return list(reissued)
+
+    async def reissue_one(self, *, job_id: str, gateway_id: str, now: datetime) -> JobRecord | None:
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job.state != JobState.ACKNOWLEDGED or job.ack_gateway_id != gateway_id:
+                return None
+            job.state = JobState.AVAILABLE
+            job.reserved_by = None
+            job.reservation_until = None
+            job.receipt_token = None
+            job.ack_gateway_id = None
+            job.ack_received_at = None
+            job.ack_payload_hash = None
+            job.ack_local_record_version = None
+            return job
+
+    async def mark_completed(self, *, job_id: str, gateway_id: str, now: datetime) -> JobRecord:
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                raise NotFoundError(f"unknown job: {job_id}")
+            if job.state == JobState.COMPLETED:
+                return job
+            if job.ack_gateway_id != gateway_id:
+                raise ConflictError("gateway/job binding mismatch")
+            job.state = JobState.COMPLETED
+            return job

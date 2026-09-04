@@ -12,6 +12,12 @@ class JobState(StrEnum):
     AVAILABLE = "AVAILABLE"
     RESERVED = "RESERVED"
     ACKNOWLEDGED = "ACKNOWLEDGED"
+    # Phase 2.6: set once a job's result has been durably recorded via
+    # POST /gateway/v1/jobs/{jobId}/results. Distinct from ACKNOWLEDGED
+    # specifically so reissue_orphaned_jobs() (2.5) - which only ever
+    # touches ACKNOWLEDGED jobs - never reissues a job that actually
+    # finished just because its gateway later goes unreachable.
+    COMPLETED = "COMPLETED"
 
 
 @dataclass
