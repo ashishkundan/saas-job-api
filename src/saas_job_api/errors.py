@@ -24,6 +24,10 @@ class BadRequestError(Exception):
     required field that isn't part of the declared request model."""
 
 
+class NotFoundError(Exception):
+    """Referenced resource does not exist."""
+
+
 def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def _on_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
@@ -45,6 +49,10 @@ def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(ConflictError)
     async def _on_conflict(_: Request, exc: ConflictError) -> JSONResponse:
         return JSONResponse(status_code=409, content={"error": "CONFLICT", "detail": str(exc)})
+
+    @app.exception_handler(NotFoundError)
+    async def _on_not_found(_: Request, exc: NotFoundError) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"error": "NOT_FOUND", "detail": str(exc)})
 
     @app.exception_handler(Exception)
     async def _on_unhandled(_: Request, exc: Exception) -> JSONResponse:

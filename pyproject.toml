@@ -10,6 +10,7 @@ dependencies = [
     "pydantic-settings>=2.2",
     "asyncpg>=0.29",
     "python-json-logger>=2.0",
+    "cryptography>=42,<48",
 ]
 
 [project.optional-dependencies]
