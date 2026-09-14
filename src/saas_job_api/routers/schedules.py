@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
+from ..audit import record_audit_event
+from ..audit_store_base import AuditLogStoreBase
 from ..auth import authenticated_admin_principal, require_any_role, require_tenant_access
 from ..errors import BadRequestError, ConflictError, NotFoundError
 from ..identity import AdminRole
@@ -28,6 +30,10 @@ def get_schedule_store(request: Request) -> ScheduleStoreBase:
 
 def get_target_store(request: Request) -> TargetStoreBase:
     return request.app.state.target_store
+
+
+def get_audit_store(request: Request) -> AuditLogStoreBase:
+    return request.app.state.audit_store
 
 
 def get_clock(request: Request) -> Clock:
@@ -55,6 +61,7 @@ async def create_schedule(
     body: ScheduleCreateRequest,
     schedule_store: ScheduleStoreBase = Depends(get_schedule_store),
     target_store: TargetStoreBase = Depends(get_target_store),
+    audit_store: AuditLogStoreBase = Depends(get_audit_store),
     clock: Clock = Depends(get_clock),
     claims: TokenClaims = Depends(require_any_role(*_WRITE_ROLES)),
 ) -> ScheduleResponse:
@@ -82,6 +89,10 @@ async def create_schedule(
         await schedule_store.create(schedule)
     except ValueError as exc:
         raise ConflictError(str(exc)) from exc
+    await record_audit_event(
+        audit_store, event_type="SCHEDULE_CREATED", actor=claims.subject,
+        tenant_id=tenant_id, resource_type="schedule", resource_id=schedule.schedule_id, now=now,
+    )
     return _to_response(schedule)
 
 
@@ -115,8 +126,14 @@ async def delete_schedule(
     tenant_id: str,
     schedule_id: str,
     store: ScheduleStoreBase = Depends(get_schedule_store),
+    audit_store: AuditLogStoreBase = Depends(get_audit_store),
+    clock: Clock = Depends(get_clock),
     claims: TokenClaims = Depends(require_any_role(*_WRITE_ROLES)),
 ) -> dict[str, str]:
     require_tenant_access(claims, tenant_id)
     await store.delete(tenant_id, schedule_id)
+    await record_audit_event(
+        audit_store, event_type="SCHEDULE_DELETED", actor=claims.subject,
+        tenant_id=tenant_id, resource_type="schedule", resource_id=schedule_id, now=clock.now(),
+    )
     return {"status": "deleted", "scheduleId": schedule_id}

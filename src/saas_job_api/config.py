@@ -64,6 +64,18 @@ class Settings(BaseSettings):
     # and would otherwise never report a result for it.
     orphaned_job_sla_seconds: float = 600.0
 
+    # Phase 2.7: audit log retention. audit_events is append-only (no
+    # update, ever) - retention_days is a floor, not a ceiling: a
+    # compliance-driven minimum of how long an event must survive before
+    # it becomes eligible for purge, not a target to purge *at*. Default
+    # is 7 years (2555 days = 365 * 7); the sweep itself only ever
+    # deletes rows already older than that floor, so it can't be used to
+    # remove a recent/inconvenient event.
+    audit_retention_days: int = 2555
+    audit_retention_sweep_enabled: bool = True
+    audit_retention_sweep_interval_seconds: float = 3_600.0  # 1h
+    audit_retention_sweep_batch_size: int = 500
+
     @property
     def gateway_tokens(self) -> dict[str, str]:
         return json.loads(self.gateway_tokens_json)

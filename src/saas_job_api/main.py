@@ -17,6 +17,9 @@ from .domain import JobRecord
 from .errors import install_exception_handlers
 from .health_store_memory import MemoryHealthStore
 from .health_store_postgres import PostgresHealthStore
+from .audit_retention import AuditRetentionSweeper
+from .audit_store_memory import MemoryAuditLogStore
+from .audit_store_postgres import PostgresAuditLogStore
 from .identity import AdminPrincipal, AdminRole
 from .inventory_store_memory import MemoryInventoryStore
 from .inventory_store_postgres import PostgresInventoryStore
@@ -26,7 +29,7 @@ from .rbac_store_memory import MemoryRbacStore
 from .rbac_store_postgres import PostgresRbacStore
 from .registration_store_memory import MemoryRegistrationStore
 from .registration_store_postgres import PostgresRegistrationStore
-from .routers import admin, admin_auth, gateway, heartbeat, registration, results, schedules, targets, tenants
+from .routers import admin, admin_auth, audit, gateway, heartbeat, registration, results, schedules, targets, tenants
 from .schedule_store_memory import MemoryScheduleStore
 from .schedule_store_postgres import PostgresScheduleStore
 from .store import create_store, close_store, new_job_id, new_correlation_id
@@ -111,6 +114,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
             app.state.target_store = PostgresTargetStore(pool)
             app.state.schedule_store = PostgresScheduleStore(pool)
             app.state.inventory_store = PostgresInventoryStore(pool)
+            app.state.audit_store = PostgresAuditLogStore(pool)
         else:
             app.state.registration_store = MemoryRegistrationStore()
             app.state.rbac_store = MemoryRbacStore()
@@ -119,6 +123,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
             app.state.target_store = MemoryTargetStore()
             app.state.schedule_store = MemoryScheduleStore()
             app.state.inventory_store = MemoryInventoryStore()
+            app.state.audit_store = MemoryAuditLogStore()
 
         app.state.ca = _build_certificate_authority(cfg)
         await _bootstrap_admin_principal(app.state.rbac_store, cfg)
@@ -142,11 +147,26 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
                 )
             )
 
+        app.state.audit_retention_shutdown_event = asyncio.Event()
+        app.state.audit_retention_task = None
+        if cfg.audit_retention_sweep_enabled:
+            sweeper = AuditRetentionSweeper(
+                store=app.state.audit_store,
+                clock=app.state.clock,
+                retention_days=cfg.audit_retention_days,
+                batch_size=cfg.audit_retention_sweep_batch_size,
+                interval_seconds=cfg.audit_retention_sweep_interval_seconds,
+            )
+            app.state.audit_retention_task = asyncio.create_task(sweeper.run(app.state.audit_retention_shutdown_event))
+
     @app.on_event("shutdown")
     async def shutdown_event():
         if app.state.scheduler_task is not None:
             app.state.scheduler_shutdown_event.set()
             await app.state.scheduler_task
+        if app.state.audit_retention_task is not None:
+            app.state.audit_retention_shutdown_event.set()
+            await app.state.audit_retention_task
         if app.state.store:
             await close_store(app.state.store)
 
@@ -161,6 +181,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
     app.include_router(targets.router)
     app.include_router(schedules.router)
     app.include_router(results.router)
+    app.include_router(audit.router)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

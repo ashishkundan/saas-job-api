@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request
 
+from ..audit import record_audit_event
+from ..audit_store_base import AuditLogStoreBase
 from ..auth import authenticated_admin_principal, require_any_role, require_tenant_access
 from ..errors import ConflictError, NotFoundError
 from ..identity import AdminRole
@@ -23,6 +25,10 @@ _WRITE_ROLES = (AdminRole.PLATFORM_ADMIN, AdminRole.TENANT_ADMIN)
 
 def get_target_store(request: Request) -> TargetStoreBase:
     return request.app.state.target_store
+
+
+def get_audit_store(request: Request) -> AuditLogStoreBase:
+    return request.app.state.audit_store
 
 
 def get_clock(request: Request) -> Clock:
@@ -48,10 +54,12 @@ async def create_target(
     tenant_id: str,
     body: TargetCreateRequest,
     store: TargetStoreBase = Depends(get_target_store),
+    audit_store: AuditLogStoreBase = Depends(get_audit_store),
     clock: Clock = Depends(get_clock),
     claims: TokenClaims = Depends(require_any_role(*_WRITE_ROLES)),
 ) -> TargetResponse:
     require_tenant_access(claims, tenant_id)
+    now = clock.now()
     target = Target(
         target_id=body.target_id or new_target_id(),
         tenant_id=tenant_id,
@@ -61,12 +69,16 @@ async def create_target(
         plugin_ref=body.plugin_ref,
         plugin_version=body.plugin_version,
         credential_ref=body.credential_ref,
-        created_at=clock.now(),
+        created_at=now,
     )
     try:
         await store.create(target)
     except ValueError as exc:
         raise ConflictError(str(exc)) from exc
+    await record_audit_event(
+        audit_store, event_type="TARGET_CREATED", actor=claims.subject,
+        tenant_id=tenant_id, resource_type="target", resource_id=target.target_id, now=now,
+    )
     return _to_response(target)
 
 
@@ -100,8 +112,14 @@ async def delete_target(
     tenant_id: str,
     target_id: str,
     store: TargetStoreBase = Depends(get_target_store),
+    audit_store: AuditLogStoreBase = Depends(get_audit_store),
+    clock: Clock = Depends(get_clock),
     claims: TokenClaims = Depends(require_any_role(*_WRITE_ROLES)),
 ) -> dict[str, str]:
     require_tenant_access(claims, tenant_id)
     await store.delete(tenant_id, target_id)
+    await record_audit_event(
+        audit_store, event_type="TARGET_DELETED", actor=claims.subject,
+        tenant_id=tenant_id, resource_type="target", resource_id=target_id, now=clock.now(),
+    )
     return {"status": "deleted", "targetId": target_id}

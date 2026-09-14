@@ -15,6 +15,8 @@ import logging
 
 from fastapi import APIRouter, Depends, Request
 
+from ..audit import record_audit_event
+from ..audit_store_base import AuditLogStoreBase
 from ..auth import authenticated_gateway
 from ..errors import BadRequestError, NotFoundError
 from ..inventory_store_base import InventoryStoreBase
@@ -34,6 +36,10 @@ def get_inventory_store(request: Request) -> InventoryStoreBase:
     return request.app.state.inventory_store
 
 
+def get_audit_store(request: Request) -> AuditLogStoreBase:
+    return request.app.state.audit_store
+
+
 def get_clock(request: Request) -> Clock:
     return request.app.state.clock
 
@@ -49,6 +55,7 @@ async def submit_result(
     body: SubmitResultRequest,
     job_store: JobStoreBase = Depends(get_job_store),
     inventory_store: InventoryStoreBase = Depends(get_inventory_store),
+    audit_store: AuditLogStoreBase = Depends(get_audit_store),
     clock: Clock = Depends(get_clock),
     gateway_id: str = Depends(authenticated_gateway),
 ) -> SubmitResultResponse:
@@ -80,6 +87,21 @@ async def submit_result(
         received_at=now,
     )
 
+    if not outcome.dedupe:
+        # Only on a genuine first submission - a retried/deduped POST
+        # didn't mutate anything new, so it doesn't get its own audit
+        # entry (the original submission's entry already covers it).
+        await record_audit_event(
+            audit_store,
+            event_type="RESULT_SUBMITTED",
+            actor=gateway_id,
+            tenant_id=job.payload.get("tenantId"),
+            resource_type="job",
+            resource_id=job_id,
+            detail={"recordCount": outcome.record_count, "pluginId": body.plugin_id},
+            now=now,
+        )
+
     logger.info(
         "job_result_submitted",
         extra={
@@ -99,12 +121,24 @@ async def report_interrupted(
     job_id: str,
     body: ReportInterruptedRequest,
     job_store: JobStoreBase = Depends(get_job_store),
+    audit_store: AuditLogStoreBase = Depends(get_audit_store),
     clock: Clock = Depends(get_clock),
     gateway_id: str = Depends(authenticated_gateway),
 ) -> dict[str, str]:
     _check_job_id(job_id, body.job_id)
 
-    reissued = await job_store.reissue_one(job_id=job_id, gateway_id=gateway_id, now=clock.now())
+    now = clock.now()
+    reissued = await job_store.reissue_one(job_id=job_id, gateway_id=gateway_id, now=now)
+
+    if reissued is not None:
+        await record_audit_event(
+            audit_store,
+            event_type="JOB_INTERRUPTED_REPORTED",
+            actor=gateway_id,
+            resource_type="job",
+            resource_id=job_id,
+            now=now,
+        )
 
     logger.info(
         "job_interrupted_reported",

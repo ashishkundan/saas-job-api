@@ -17,6 +17,8 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.x509 import load_pem_x509_csr
 from fastapi import APIRouter, Depends, Request
 
+from ..audit import record_audit_event
+from ..audit_store_base import AuditLogStoreBase
 from ..auth import authenticated_admin_principal, get_settings, require_role
 from ..certs import CertificateAuthority, InvalidCsrError
 from ..config import Settings
@@ -33,6 +35,10 @@ from ..time_provider import Clock
 
 admin_router = APIRouter(prefix="/admin/v1", tags=["registration-admin"])
 gateway_router = APIRouter(prefix="/gateway/v1", tags=["registration-gateway"])
+
+
+def get_audit_store(request: Request) -> AuditLogStoreBase:
+    return request.app.state.audit_store
 
 
 def _hash_token(token: str) -> str:
@@ -55,6 +61,7 @@ def get_clock(request: Request) -> Clock:
 async def issue_enrollment_token(
     request: Request,
     store: RegistrationStoreBase = Depends(get_registration_store),
+    audit_store: AuditLogStoreBase = Depends(get_audit_store),
     clock: Clock = Depends(get_clock),
     settings: Settings = Depends(get_settings),
     principal=Depends(require_role(AdminRole.PLATFORM_ADMIN)),
@@ -69,6 +76,14 @@ async def issue_enrollment_token(
         issued_by=principal.subject,
     )
     await store.create_enrollment_token(token)
+    await record_audit_event(
+        audit_store,
+        event_type="ENROLLMENT_TOKEN_ISSUED",
+        actor=principal.subject,
+        resource_type="enrollment_token",
+        resource_id=token.token_id,
+        now=now,
+    )
     return EnrollmentTokenResponse(token=plaintext, expiresAt=token.expires_at)
 
 
@@ -76,6 +91,7 @@ async def issue_enrollment_token(
 async def register_gateway(
     body: GatewayRegisterRequest,
     store: RegistrationStoreBase = Depends(get_registration_store),
+    audit_store: AuditLogStoreBase = Depends(get_audit_store),
     ca: CertificateAuthority = Depends(get_ca),
     clock: Clock = Depends(get_clock),
 ) -> GatewayRegisterResponse:
@@ -116,6 +132,14 @@ async def register_gateway(
     )
     await store.upsert_gateway_identity(identity)
     await store.mark_enrollment_token_used(token.token_id, used_at=now, gateway_id=body.gateway_id)
+    await record_audit_event(
+        audit_store,
+        event_type="GATEWAY_REGISTERED",
+        actor=body.gateway_id,
+        resource_type="gateway",
+        resource_id=body.gateway_id,
+        now=now,
+    )
 
     return GatewayRegisterResponse(
         gatewayId=body.gateway_id,
