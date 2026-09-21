@@ -219,6 +219,17 @@ async def test_login_failure_audit_never_records_the_password(client, app) -> No
         assert "super-secret-password" != event.actor
 
 
+async def test_login_rejects_oversized_username_with_400_not_500(client) -> None:
+    # Regression: an unbounded username used to reach the ADMIN_LOGIN_FAILED
+    # audit write, whose actor column is VARCHAR(200) NOT NULL - on Postgres
+    # that raised StringDataRightTruncation and surfaced as a raw 500
+    # instead of the intended 401. Field(max_length=200) on
+    # AdminLoginRequest now rejects it before either the auth check or the
+    # audit write runs.
+    resp = await client.post("/admin/v1/login", json={"username": "x" * 201, "password": "pw"})
+
+    assert resp.status_code == 400
+
 async def test_enrollment_token_issuance_is_audited(client, platform_admin_token, app) -> None:
     resp = await client.post("/admin/v1/enrollment-tokens", headers=_auth(platform_admin_token))
     assert resp.status_code == 200, resp.text
