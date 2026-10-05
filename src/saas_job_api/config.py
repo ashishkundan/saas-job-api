@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     reservation_ttl_seconds: float = 60.0
     default_max_jobs: int = 20
     default_poll_after_ms: int = 2000
+    default_gateway_heartbeat_interval_ms: int = 60_000
     seed_file: str | None = None
     
     # PostgreSQL connection URL (None = use in-memory store for dev)

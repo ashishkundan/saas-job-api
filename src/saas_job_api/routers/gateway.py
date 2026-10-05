@@ -23,6 +23,7 @@ from ..auth import authenticated_gateway, bind_gateway_id, get_settings
 from ..errors import BadRequestError
 from ..health import HealthState, derive_current_status
 from ..health_store_base import HealthStoreBase
+from ..gateway_operational_config_store_base import GatewayOperationalConfigStoreBase
 from ..models.poll import Job, PollRequest, PollResponse
 from ..models.received import ReceivedRequest, ReceivedResponse
 from ..store_base import JobStoreBase
@@ -41,12 +42,17 @@ def get_health_store(request: Request) -> HealthStoreBase:
     return request.app.state.health_store
 
 
+def get_config_store(request: Request) -> GatewayOperationalConfigStoreBase:
+    return request.app.state.gateway_operational_config_store
+
+
 @router.post("/poll", response_model=None)
 async def poll_jobs(
     body: PollRequest,
     request: Request,
     store: JobStoreBase = Depends(get_store),
     health_store: HealthStoreBase = Depends(get_health_store),
+    config_store: GatewayOperationalConfigStoreBase = Depends(get_config_store),
     gateway_id: str = Depends(authenticated_gateway),
 ):
     bind_gateway_id(body.gateway_id, gateway_id)
@@ -70,6 +76,13 @@ async def poll_jobs(
 
     settings = get_settings(request)
     now = store.clock.now()
+    operational_config = await config_store.get(gateway_id)
+    if operational_config is not None and not operational_config.accept_new_jobs:
+        logger.info(
+            "poll_held_admin_disabled",
+            extra={"event": "poll_held_admin_disabled", "gateway_id": gateway_id},
+        )
+        return Response(status_code=204)
 
     # Developer Implementation Guide §24: a gateway whose own last-reported
     # health has decayed to UNREACHABLE/FAILED gets no new work - jobs are
@@ -142,7 +155,11 @@ async def poll_jobs(
         requestId=body.request_id or str(uuid.uuid4()),
         serverTime=now,
         receivedAt=now,
-        pollAfterMs=settings.default_poll_after_ms,
+        pollAfterMs=(
+            operational_config.poll_interval_ms
+            if operational_config is not None
+            else settings.default_poll_after_ms
+        ),
         reservationUntil=reservation_until,
         jobs=jobs,
     )

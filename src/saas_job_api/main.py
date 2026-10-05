@@ -20,6 +20,8 @@ from .health_store_postgres import PostgresHealthStore
 from .audit_retention import AuditRetentionSweeper
 from .audit_store_memory import MemoryAuditLogStore
 from .audit_store_postgres import PostgresAuditLogStore
+from .gateway_operational_config_store_memory import MemoryGatewayOperationalConfigStore
+from .gateway_operational_config_store_postgres import PostgresGatewayOperationalConfigStore
 from .identity import AdminPrincipal, AdminRole
 from .inventory_store_memory import MemoryInventoryStore
 from .inventory_store_postgres import PostgresInventoryStore
@@ -29,7 +31,7 @@ from .rbac_store_memory import MemoryRbacStore
 from .rbac_store_postgres import PostgresRbacStore
 from .registration_store_memory import MemoryRegistrationStore
 from .registration_store_postgres import PostgresRegistrationStore
-from .routers import admin, admin_auth, audit, gateway, heartbeat, registration, results, schedules, targets, tenants
+from .routers import admin, admin_auth, audit, gateway, gateway_config, heartbeat, registration, results, schedules, targets, tenants
 from .schedule_store_memory import MemoryScheduleStore
 from .schedule_store_postgres import PostgresScheduleStore
 from .store import create_store, close_store, new_job_id, new_correlation_id
@@ -115,6 +117,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
             app.state.schedule_store = PostgresScheduleStore(pool)
             app.state.inventory_store = PostgresInventoryStore(pool)
             app.state.audit_store = PostgresAuditLogStore(pool)
+            app.state.gateway_operational_config_store = PostgresGatewayOperationalConfigStore(pool)
         else:
             app.state.registration_store = MemoryRegistrationStore()
             app.state.rbac_store = MemoryRbacStore()
@@ -124,6 +127,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
             app.state.schedule_store = MemoryScheduleStore()
             app.state.inventory_store = MemoryInventoryStore()
             app.state.audit_store = MemoryAuditLogStore()
+            app.state.gateway_operational_config_store = MemoryGatewayOperationalConfigStore()
 
         app.state.ca = _build_certificate_authority(cfg)
         await _bootstrap_admin_principal(app.state.rbac_store, cfg)
@@ -172,6 +176,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
 
     install_exception_handlers(app)
     app.include_router(gateway.router)
+    app.include_router(gateway_config.router)
     app.include_router(admin.router)
     app.include_router(registration.admin_router)
     app.include_router(registration.gateway_router)
