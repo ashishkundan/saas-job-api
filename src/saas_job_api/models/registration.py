@@ -14,6 +14,12 @@ class EnrollmentTokenResponse(BaseModel):
     expires_at: datetime = Field(alias="expiresAt")
 
 
+class EnrollmentTokenRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    tenant_id: str | None = Field(default=None, alias="tenantId")
+
+
 class GatewayRegisterRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 

@@ -28,6 +28,7 @@ class EnrollmentToken:
     issued_by: str | None = None
     used_at: datetime | None = None
     used_by_gateway_id: str | None = None
+    tenant_id: str | None = None
 
     @property
     def is_used(self) -> bool:
@@ -49,6 +50,13 @@ class GatewayIdentity:
     registered_at: datetime
     last_rotated_at: datetime
     tenant_id: str | None = None
+
+
+class GatewayIdentityTenantMismatch(ValueError):
+    """Raised when a Gateway identity is registered to another tenant."""
+
+    def __init__(self, gateway_id: str) -> None:
+        super().__init__(f"Gateway {gateway_id!r} is already bound to another tenant")
 
 
 @dataclass(slots=True)

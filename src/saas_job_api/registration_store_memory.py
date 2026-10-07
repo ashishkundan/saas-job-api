@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .identity import EnrollmentToken, GatewayIdentity
+from .identity import EnrollmentToken, GatewayIdentity, GatewayIdentityTenantMismatch
 from .registration_store_base import RegistrationStoreBase
 
 
@@ -35,6 +35,9 @@ class MemoryRegistrationStore(RegistrationStoreBase):
 
     async def upsert_gateway_identity(self, identity: GatewayIdentity) -> GatewayIdentity:
         async with self._lock:
+            previous = self._identities.get(identity.gateway_id)
+            if previous is not None and previous.tenant_id is not None and previous.tenant_id != identity.tenant_id:
+                raise GatewayIdentityTenantMismatch(identity.gateway_id)
             self._identities[identity.gateway_id] = identity
             return identity
 

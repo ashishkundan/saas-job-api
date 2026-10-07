@@ -17,19 +17,23 @@ class PostgresAuditLogStore(AuditLogStoreBase):
 
     async def append(self, event: AuditEvent) -> AuditEvent:
         async with self.pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO audit_events "
-                "(event_id, event_type, actor, tenant_id, resource_type, resource_id, detail, occurred_at) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-                event.event_id,
-                event.event_type,
-                event.actor,
-                event.tenant_id,
-                event.resource_type,
-                event.resource_id,
-                json.dumps(event.detail),
-                event.occurred_at,
-            )
+            await self.append_with_connection(conn, event)
+        return event
+
+    async def append_with_connection(self, connection, event: AuditEvent) -> AuditEvent:
+        await connection.execute(
+            "INSERT INTO audit_events "
+            "(event_id, event_type, actor, tenant_id, resource_type, resource_id, detail, occurred_at) "
+            "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            event.event_id,
+            event.event_type,
+            event.actor,
+            event.tenant_id,
+            event.resource_type,
+            event.resource_id,
+            json.dumps(event.detail),
+            event.occurred_at,
+        )
         return event
 
     async def list_recent(self, *, tenant_id: str | None = None, limit: int = 100) -> list[AuditEvent]:

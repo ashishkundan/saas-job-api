@@ -10,7 +10,9 @@ DEFAULT_HEARTBEAT_INTERVAL_MS = 60_000
 MIN_POLL_INTERVAL_MS = 500
 MAX_POLL_INTERVAL_MS = 300_000
 MIN_HEARTBEAT_INTERVAL_MS = 1_000
-MAX_HEARTBEAT_INTERVAL_MS = 900_000
+# Keep Gateway heartbeats frequent enough for the SaaS 300s unreachable
+# threshold and the scheduler's orphan-reissue decision.
+MAX_HEARTBEAT_INTERVAL_MS = 60_000
 
 
 @dataclass(slots=True, frozen=True)
@@ -26,3 +28,6 @@ class GatewayOperationalConfig:
 
 class GatewayConfigTenantMismatch(ValueError):
     """Raised when an existing Gateway configuration is assigned elsewhere."""
+
+    def __init__(self, gateway_id: str) -> None:
+        super().__init__(f"Gateway {gateway_id!r} is already assigned to another tenant")

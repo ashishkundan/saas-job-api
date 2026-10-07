@@ -23,14 +23,16 @@ from ..auth import authenticated_admin_principal, get_settings, require_role
 from ..certs import CertificateAuthority, InvalidCsrError
 from ..config import Settings
 from ..errors import BadRequestError, NotFoundError, UnauthorizedError
-from ..identity import AdminRole, EnrollmentToken, GatewayIdentity
+from ..identity import AdminRole, EnrollmentToken, GatewayIdentity, GatewayIdentityTenantMismatch
 from ..models.registration import (
+    EnrollmentTokenRequest,
     EnrollmentTokenResponse,
     GatewayRegisterRequest,
     GatewayRegisterResponse,
     GatewayRegistrationStatusResponse,
 )
 from ..registration_store_base import RegistrationStoreBase
+from ..tenant_store_base import TenantStoreBase
 from ..time_provider import Clock
 
 admin_router = APIRouter(prefix="/admin/v1", tags=["registration-admin"])
@@ -49,6 +51,10 @@ def get_registration_store(request: Request) -> RegistrationStoreBase:
     return request.app.state.registration_store
 
 
+def get_tenant_store(request: Request) -> TenantStoreBase:
+    return request.app.state.tenant_store
+
+
 def get_ca(request: Request) -> CertificateAuthority:
     return request.app.state.ca
 
@@ -60,12 +66,17 @@ def get_clock(request: Request) -> Clock:
 @admin_router.post("/enrollment-tokens", response_model=EnrollmentTokenResponse)
 async def issue_enrollment_token(
     request: Request,
+    body: EnrollmentTokenRequest | None = None,
     store: RegistrationStoreBase = Depends(get_registration_store),
+    tenant_store: TenantStoreBase = Depends(get_tenant_store),
     audit_store: AuditLogStoreBase = Depends(get_audit_store),
     clock: Clock = Depends(get_clock),
     settings: Settings = Depends(get_settings),
     principal=Depends(require_role(AdminRole.PLATFORM_ADMIN)),
 ) -> EnrollmentTokenResponse:
+    tenant_id = body.tenant_id if body is not None else None
+    if tenant_id is not None and await tenant_store.get(tenant_id) is None:
+        raise NotFoundError("Tenant not found")
     plaintext = secrets.token_urlsafe(32)
     now = clock.now()
     token = EnrollmentToken(
@@ -74,6 +85,7 @@ async def issue_enrollment_token(
         created_at=now,
         expires_at=now + timedelta(seconds=settings.enrollment_token_ttl_seconds),
         issued_by=principal.subject,
+        tenant_id=tenant_id,
     )
     await store.create_enrollment_token(token)
     await record_audit_event(
@@ -83,6 +95,7 @@ async def issue_enrollment_token(
         resource_type="enrollment_token",
         resource_id=token.token_id,
         now=now,
+        tenant_id=tenant_id,
     )
     return EnrollmentTokenResponse(token=plaintext, expiresAt=token.expires_at)
 
@@ -121,6 +134,8 @@ async def register_gateway(
     fingerprint = hashlib.sha256(public_key_bytes).hexdigest()
 
     existing = await store.get_gateway_identity(body.gateway_id)
+    if existing is not None and existing.tenant_id is not None and existing.tenant_id != token.tenant_id:
+        raise UnauthorizedError()
     identity = GatewayIdentity(
         gateway_id=body.gateway_id,
         public_key_fingerprint=fingerprint,
@@ -129,8 +144,12 @@ async def register_gateway(
         certificate_not_after=not_after,
         registered_at=existing.registered_at if existing is not None else now,
         last_rotated_at=now,
+        tenant_id=(existing.tenant_id if existing is not None else None) or token.tenant_id,
     )
-    await store.upsert_gateway_identity(identity)
+    try:
+        await store.upsert_gateway_identity(identity)
+    except GatewayIdentityTenantMismatch as exc:
+        raise UnauthorizedError() from exc
     await store.mark_enrollment_token_used(token.token_id, used_at=now, gateway_id=body.gateway_id)
     await record_audit_event(
         audit_store,

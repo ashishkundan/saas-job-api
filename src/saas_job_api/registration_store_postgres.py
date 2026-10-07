@@ -6,7 +6,7 @@ from datetime import datetime
 
 from asyncpg import Pool
 
-from .identity import EnrollmentToken, GatewayIdentity
+from .identity import EnrollmentToken, GatewayIdentity, GatewayIdentityTenantMismatch
 from .registration_store_base import RegistrationStoreBase
 
 
@@ -18,8 +18,8 @@ class PostgresRegistrationStore(RegistrationStoreBase):
         async with self.pool.acquire() as conn:
             await conn.execute(
                 "INSERT INTO enrollment_tokens "
-                "(token_id, token_hash, created_at, expires_at, issued_by, used_at, used_by_gateway_id) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7)",
+                "(token_id, token_hash, created_at, expires_at, issued_by, used_at, used_by_gateway_id, tenant_id) "
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
                 token.token_id,
                 token.token_hash,
                 token.created_at,
@@ -27,6 +27,7 @@ class PostgresRegistrationStore(RegistrationStoreBase):
                 token.issued_by,
                 token.used_at,
                 token.used_by_gateway_id,
+                token.tenant_id,
             )
         return token
 
@@ -46,17 +47,21 @@ class PostgresRegistrationStore(RegistrationStoreBase):
 
     async def upsert_gateway_identity(self, identity: GatewayIdentity) -> GatewayIdentity:
         async with self.pool.acquire() as conn:
-            await conn.execute(
+            row = await conn.fetchrow(
                 "INSERT INTO gateway_identities "
                 "(gateway_id, tenant_id, public_key_fingerprint, certificate_pem, certificate_serial, "
                 "certificate_not_after, registered_at, last_rotated_at) "
                 "VALUES ($1, $2, $3, $4, $5, $6, $7, $8) "
                 "ON CONFLICT (gateway_id) DO UPDATE SET "
+                "tenant_id = COALESCE(gateway_identities.tenant_id, EXCLUDED.tenant_id), "
                 "public_key_fingerprint = EXCLUDED.public_key_fingerprint, "
                 "certificate_pem = EXCLUDED.certificate_pem, "
                 "certificate_serial = EXCLUDED.certificate_serial, "
                 "certificate_not_after = EXCLUDED.certificate_not_after, "
-                "last_rotated_at = EXCLUDED.last_rotated_at",
+                "last_rotated_at = EXCLUDED.last_rotated_at "
+                "WHERE gateway_identities.tenant_id IS NULL "
+                "OR gateway_identities.tenant_id = EXCLUDED.tenant_id "
+                "RETURNING *",
                 identity.gateway_id,
                 identity.tenant_id,
                 identity.public_key_fingerprint,
@@ -66,7 +71,9 @@ class PostgresRegistrationStore(RegistrationStoreBase):
                 identity.registered_at,
                 identity.last_rotated_at,
             )
-        return identity
+        if row is None:
+            raise GatewayIdentityTenantMismatch(identity.gateway_id)
+        return self._row_to_identity(row)
 
     async def get_gateway_identity(self, gateway_id: str) -> GatewayIdentity | None:
         async with self.pool.acquire() as conn:
@@ -83,6 +90,7 @@ class PostgresRegistrationStore(RegistrationStoreBase):
             issued_by=row["issued_by"],
             used_at=row["used_at"],
             used_by_gateway_id=row["used_by_gateway_id"],
+            tenant_id=row["tenant_id"],
         )
 
     @staticmethod

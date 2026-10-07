@@ -4,6 +4,8 @@ look up registration status."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import httpx
 import pytest
 from cryptography import x509
@@ -12,7 +14,10 @@ from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.x509.oid import NameOID
 
 from conftest import make_test_settings
+from saas_job_api.identity import AdminRole
+from saas_job_api.jwt_tokens import issue_token
 from saas_job_api.main import create_app
+from saas_job_api.tenancy import Tenant
 
 ADMIN_USERNAME = "platform-admin"
 ADMIN_PASSWORD = "correct horse battery staple"
@@ -29,7 +34,7 @@ def _build_gateway_csr(gateway_id: str) -> tuple[Ed25519PrivateKey, str]:
 
 
 @pytest.fixture
-async def client():
+async def app():
     app = create_app(
         settings=make_test_settings(
             bootstrap_admin_username=ADMIN_USERNAME,
@@ -37,9 +42,14 @@ async def client():
         )
     )
     async with app.router.lifespan_context(app):
-        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
+        yield app
+
+
+@pytest.fixture
+async def client(app):
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
 
 
 async def _login(client: httpx.AsyncClient) -> str:
@@ -171,3 +181,58 @@ async def test_gateway_registration_can_be_rotated_with_a_fresh_token(client: ht
     )
     assert second.status_code == 200
     assert second.json()["certificatePem"] != first.json()["certificatePem"]
+
+
+async def test_enrollment_token_binds_gateway_registration_to_its_tenant(app, client: httpx.AsyncClient) -> None:
+    await app.state.tenant_store.create(
+        Tenant("tenant-a", "Tenant A", datetime(2026, 10, 7, tzinfo=timezone.utc))
+    )
+    await app.state.tenant_store.create(
+        Tenant("tenant-b", "Tenant B", datetime(2026, 10, 7, tzinfo=timezone.utc))
+    )
+    admin_token = issue_token(
+        secret=app.state.settings.jwt_secret,
+        subject="tenant-binding-admin",
+        role=AdminRole.PLATFORM_ADMIN.value,
+        ttl_seconds=3600,
+    )
+
+    token_response = await client.post(
+        "/admin/v1/enrollment-tokens",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"tenantId": "tenant-a"},
+    )
+    assert token_response.status_code == 200, token_response.text
+    _, csr_pem = _build_gateway_csr("gw-tenant-bound")
+    registered = await client.post(
+        "/gateway/v1/register",
+        json={
+            "enrollmentToken": token_response.json()["token"],
+            "gatewayId": "gw-tenant-bound",
+            "csrPem": csr_pem,
+        },
+    )
+    assert registered.status_code == 200, registered.text
+    identity = await app.state.registration_store.get_gateway_identity("gw-tenant-bound")
+    assert identity is not None
+    assert identity.tenant_id == "tenant-a"
+
+    other_token = await client.post(
+        "/admin/v1/enrollment-tokens",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"tenantId": "tenant-b"},
+    )
+    _, other_csr = _build_gateway_csr("gw-tenant-bound")
+    attempted_rotation = await client.post(
+        "/gateway/v1/register",
+        json={
+            "enrollmentToken": other_token.json()["token"],
+            "gatewayId": "gw-tenant-bound",
+            "csrPem": other_csr,
+        },
+    )
+    assert attempted_rotation.status_code == 401
+    assert (await app.state.registration_store.get_gateway_identity("gw-tenant-bound")).tenant_id == "tenant-a"
+
+    events = await app.state.audit_store.list_recent(tenant_id="tenant-a")
+    assert any(event.event_type == "ENROLLMENT_TOKEN_ISSUED" for event in events)

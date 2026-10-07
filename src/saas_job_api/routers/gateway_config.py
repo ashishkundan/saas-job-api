@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, Request
 
-from ..audit import record_audit_event
+from ..audit import AuditEvent
 from ..audit_store_base import AuditLogStoreBase
 from ..auth import (
     authenticated_admin_principal,
@@ -24,6 +26,7 @@ from ..gateway_operational_config_store_base import GatewayOperationalConfigStor
 from ..identity import AdminRole
 from ..jwt_tokens import TokenClaims
 from ..models.gateway_config import GatewayOperationalConfigResponse, GatewayOperationalConfigUpdate
+from ..registration_store_base import RegistrationStoreBase
 from ..tenant_store_base import TenantStoreBase
 from ..time_provider import Clock
 
@@ -37,6 +40,10 @@ def get_config_store(request: Request) -> GatewayOperationalConfigStoreBase:
 
 def get_tenant_store(request: Request) -> TenantStoreBase:
     return request.app.state.tenant_store
+
+
+def get_registration_store(request: Request) -> RegistrationStoreBase:
+    return request.app.state.registration_store
 
 
 def get_audit_store(request: Request) -> AuditLogStoreBase:
@@ -116,6 +123,7 @@ async def update_admin_gateway_config(
     body: GatewayOperationalConfigUpdate,
     config_store: GatewayOperationalConfigStoreBase = Depends(get_config_store),
     tenant_store: TenantStoreBase = Depends(get_tenant_store),
+    registration_store: RegistrationStoreBase = Depends(get_registration_store),
     audit_store: AuditLogStoreBase = Depends(get_audit_store),
     clock: Clock = Depends(get_clock),
     claims: TokenClaims = Depends(require_any_role(*_WRITE_ROLES)),
@@ -124,63 +132,62 @@ async def update_admin_gateway_config(
     if await tenant_store.get(tenant_id) is None:
         raise NotFoundError("Tenant not found")
 
+    identity = await registration_store.get_gateway_identity(gateway_id)
+    if identity is None or identity.tenant_id != tenant_id:
+        raise NotFoundError("Gateway configuration not found")
+
     previous = await config_store.get(gateway_id)
     if previous is None and claims.role != AdminRole.PLATFORM_ADMIN.value:
         raise NotFoundError("Gateway configuration not found")
     if previous is not None and previous.tenant_id != tenant_id:
         raise NotFoundError("Gateway configuration not found")
 
-    same_values = previous is not None and (
-        previous.poll_interval_ms == body.poll_interval_ms
-        and previous.heartbeat_interval_ms == body.heartbeat_interval_ms
-        and previous.accept_new_jobs == body.accept_new_jobs
-    )
-    if same_values:
-        return _response(
-            previous,
-            default_poll_interval_ms=previous.poll_interval_ms,
-            default_heartbeat_interval_ms=previous.heartbeat_interval_ms,
-        )
-
     try:
-        updated = await config_store.save(
+        previous, updated = await config_store.save_with_previous(
             gateway_id=gateway_id,
             tenant_id=tenant_id,
             poll_interval_ms=body.poll_interval_ms,
             heartbeat_interval_ms=body.heartbeat_interval_ms,
             accept_new_jobs=body.accept_new_jobs,
             updated_at=clock.now(),
+            audit_store=audit_store,
+            audit_event_factory=lambda old, current: AuditEvent(
+                event_id=str(uuid.uuid4()),
+                event_type="GATEWAY_OPERATIONAL_CONFIG_UPDATED",
+                actor=claims.subject,
+                tenant_id=tenant_id,
+                resource_type="gateway_config",
+                resource_id=gateway_id,
+                detail={
+                    "previous": (
+                        {
+                            "pollIntervalMs": old.poll_interval_ms,
+                            "heartbeatIntervalMs": old.heartbeat_interval_ms,
+                            "acceptNewJobs": old.accept_new_jobs,
+                            "configVersion": old.config_version,
+                        }
+                        if old is not None
+                        else None
+                    ),
+                    "current": {
+                        "pollIntervalMs": current.poll_interval_ms,
+                        "heartbeatIntervalMs": current.heartbeat_interval_ms,
+                        "acceptNewJobs": current.accept_new_jobs,
+                        "configVersion": current.config_version,
+                    },
+                },
+                occurred_at=current.updated_at,
+            ),
         )
     except GatewayConfigTenantMismatch as exc:
         raise NotFoundError("Gateway configuration not found") from exc
+    if previous is not None and previous.config_version == updated.config_version:
+        return _response(
+            updated,
+            default_poll_interval_ms=updated.poll_interval_ms,
+            default_heartbeat_interval_ms=updated.heartbeat_interval_ms,
+        )
 
-    await record_audit_event(
-        audit_store,
-        event_type="GATEWAY_OPERATIONAL_CONFIG_UPDATED",
-        actor=claims.subject,
-        tenant_id=tenant_id,
-        resource_type="gateway_config",
-        resource_id=gateway_id,
-        now=updated.updated_at,
-        detail={
-            "previous": (
-                {
-                    "pollIntervalMs": previous.poll_interval_ms,
-                    "heartbeatIntervalMs": previous.heartbeat_interval_ms,
-                    "acceptNewJobs": previous.accept_new_jobs,
-                    "configVersion": previous.config_version,
-                }
-                if previous is not None
-                else None
-            ),
-            "current": {
-                "pollIntervalMs": updated.poll_interval_ms,
-                "heartbeatIntervalMs": updated.heartbeat_interval_ms,
-                "acceptNewJobs": updated.accept_new_jobs,
-                "configVersion": updated.config_version,
-            },
-        },
-    )
     return _response(
         updated,
         default_poll_interval_ms=updated.poll_interval_ms,

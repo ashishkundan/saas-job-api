@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEV_DEFAULT_TOKENS = '{"dev-gateway-token": "gw_dev_local"}'
@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     reservation_ttl_seconds: float = 60.0
     default_max_jobs: int = 20
     default_poll_after_ms: int = 2000
-    default_gateway_heartbeat_interval_ms: int = 60_000
+    default_gateway_heartbeat_interval_ms: int = Field(default=60_000, ge=1_000, le=60_000)
     seed_file: str | None = None
     
     # PostgreSQL connection URL (None = use in-memory store for dev)

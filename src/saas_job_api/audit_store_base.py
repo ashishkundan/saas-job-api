@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Any
 
 from .audit import AuditEvent
 
@@ -22,6 +23,11 @@ class AuditLogStoreBase(ABC):
     @abstractmethod
     async def append(self, event: AuditEvent) -> AuditEvent:
         """Persist one audit event."""
+
+    async def append_with_connection(self, connection: Any, event: AuditEvent) -> AuditEvent:
+        """Append using a caller-owned transaction when the store supports it."""
+
+        raise NotImplementedError("this audit store does not support external transactions")
 
     @abstractmethod
     async def list_recent(self, *, tenant_id: str | None = None, limit: int = 100) -> list[AuditEvent]:
