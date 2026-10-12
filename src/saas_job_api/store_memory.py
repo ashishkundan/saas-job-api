@@ -29,6 +29,7 @@ class MemoryJobStore(JobStoreBase):
     _jobs: dict[str, JobRecord] = field(default_factory=dict)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _pending_fault: PendingFault | None = None
+    _interrupted_attempts: set[tuple[str, str, str]] = field(default_factory=set)
 
     async def seed(self, record: JobRecord) -> JobRecord:
         async with self._lock:
@@ -40,6 +41,7 @@ class MemoryJobStore(JobStoreBase):
     async def reset(self) -> None:
         async with self._lock:
             self._jobs.clear()
+            self._interrupted_attempts.clear()
             self._pending_fault = None
 
     async def list_all(self) -> list[JobRecord]:
@@ -145,8 +147,13 @@ class MemoryJobStore(JobStoreBase):
                     reissued.append(job)
             return list(reissued)
 
-    async def reissue_one(self, *, job_id: str, gateway_id: str, now: datetime) -> JobRecord | None:
+    async def reissue_one(
+        self, *, job_id: str, gateway_id: str, attempt_token: str, now: datetime,
+    ) -> JobRecord | None:
         async with self._lock:
+            key = (job_id, gateway_id, attempt_token)
+            if key in self._interrupted_attempts:
+                return None
             job = self._jobs.get(job_id)
             if job is None or job.state != JobState.ACKNOWLEDGED or job.ack_gateway_id != gateway_id:
                 return None
@@ -158,6 +165,7 @@ class MemoryJobStore(JobStoreBase):
             job.ack_received_at = None
             job.ack_payload_hash = None
             job.ack_local_record_version = None
+            self._interrupted_attempts.add(key)
             return job
 
     async def mark_completed(self, *, job_id: str, gateway_id: str, now: datetime) -> JobRecord:

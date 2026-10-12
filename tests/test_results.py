@@ -211,6 +211,28 @@ async def test_report_interrupted_for_an_unknown_job_is_a_noop_not_404(client, g
     assert resp.json()["status"] == "noop"
 
 
+async def test_retried_interruption_does_not_reissue_a_new_attempt_on_same_gateway(
+    client, admin_headers, gateway_headers,
+) -> None:
+    job_id = await _seed_claim_and_ack(client, admin_headers, gateway_headers)
+    url = f"/gateway/v1/jobs/{job_id}/interrupted"
+    first = await client.post(url, json={"attemptToken": "attempt-1"}, headers=gateway_headers)
+    assert first.json()["status"] == "reissued"
+    poll = await client.post("/gateway/v1/jobs/poll", json={"maxJobs": 20}, headers=gateway_headers)
+    receipt_token = poll.json()["jobs"][0]["receiptToken"]
+    ack = await client.post(
+        f"/gateway/v1/jobs/{job_id}/received",
+        json={"receiptToken": receipt_token, "receivedAt": "2026-08-02T01:30:00Z"},
+        headers=gateway_headers,
+    )
+    assert ack.status_code == 200
+    retry = await client.post(url, json={"attemptToken": "attempt-1"}, headers=gateway_headers)
+    assert retry.json()["status"] == "noop"
+    assert await _job_state(client, admin_headers, job_id) == "ACKNOWLEDGED"
+    next_interruption = await client.post(url, json={"attemptToken": "attempt-2"}, headers=gateway_headers)
+    assert next_interruption.json()["status"] == "reissued"
+
+
 async def test_a_completed_job_is_never_reissued_as_orphaned(client, admin_headers, gateway_headers, app, clock) -> None:
     """Regression proof for the exact bug this phase's ordering (mark
     completed before this job's gateway could ever be checked again) is

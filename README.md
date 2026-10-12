@@ -21,6 +21,64 @@ Default dev bearer token: `dev-gateway-token` (bound to `gw_dev_local`).
 Default admin token: `dev-admin-token`. Override via `SAAS_JOB_API_*` env vars
 (see `src/saas_job_api/config.py`).
 
+## Plan A production release prerequisites
+
+The reviewed Plan A SaaS baseline is `85c29b0`. Production is intended to
+use Render API instances with Render PostgreSQL, not the in-memory
+development fallback or a database on the operator's laptop. Confirm the
+actual deployed revision, database selection, current schema and tested
+backup/restore process before authorizing a release.
+
+The configuration endpoints are `GET /gateway/v1/config`, authenticated as
+the registered Gateway, and
+`PUT /admin/v1/tenants/{tenantId}/gateways/{gatewayId}/config`, authenticated
+as the appropriate tenant administrator. Enrollment must bind the Gateway
+to that tenant before configuration can be assigned. Check tenant isolation,
+monotonic config versions, audit persistence and paused polling before
+enabling a pilot Gateway.
+
+Apply additive migrations through `009` before deploying compatible API
+code: `007` adds `gateway_operational_configs`; `008` adds nullable
+`enrollment_tokens.tenant_id`; `009` adds `job_interruption_receipts` so
+accepted interruption retries cannot reissue a newer attempt on the same
+Gateway. Receipt insertion and reissue are one PostgreSQL transaction,
+serialized by the job row lock. Receipts are retained for the lifetime of
+the job and cascade-delete when that job is deleted. Use an approved runner with the declared
+Alembic/SQLAlchemy development dependencies installed. Supply
+`SAAS_JOB_API_DATABASE_URL` through the secure environment, never the
+command line or chat. From this repository run:
+
+```bash
+alembic -c alembic.ini upgrade head
+alembic -c alembic.ini current
+```
+
+Use the installed `alembic` executable rather than `python -m alembic`
+from the repository directory, whose local migration package shadows the
+installed module. Require `009 (head)`. The current Render blueprint
+neither installs migration extras nor defines a predeploy migration hook;
+do not assume ordinary application deployment applies migrations.
+This procedure is not authorization to run against production.
+
+For local validation only, set `SAAS_JOB_API_TEST_DATABASE_URL` to an
+explicitly disposable `localhost`/`127.0.0.1`/`::1` PostgreSQL database,
+apply the same migrations, and run
+`pytest -q tests/test_gateway_operational_config_postgres.py`.
+This checks concurrent version allocation, tenant binding and rollback of
+configuration writes when their audit insert fails, plus interruption
+deduplication across concurrent callers and a new store instance. Without this setting
+the test skips; in-memory API tests do not prove PostgreSQL persistence.
+
+Rollback application/configuration changes while retaining the additive
+schema. Do not automatically downgrade `007`, `008` or `009`: their downgrades
+delete configuration data, enrollment tenant binding or interruption
+deduplication. Deploy migration `009` and compatible SaaS code before
+enabling durable interruption retries in the Gateway. Do not roll the SaaS
+handler back to non-deduplicating code while Gateways may replay.
+Independently
+verify persisted certificate inventory and idempotent result retries
+during an authorized pilot; a completed job is not sufficient proof.
+
 ## Quickstart / example walkthrough
 
 With the server running (`python scripts/run_dev.py`), here's the full

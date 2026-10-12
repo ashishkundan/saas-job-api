@@ -128,7 +128,9 @@ async def report_interrupted(
     _check_job_id(job_id, body.job_id)
 
     now = clock.now()
-    reissued = await job_store.reissue_one(job_id=job_id, gateway_id=gateway_id, now=now)
+    reissued = await job_store.reissue_one(
+        job_id=job_id, gateway_id=gateway_id, attempt_token=body.attempt_token, now=now,
+    )
 
     if reissued is not None:
         await record_audit_event(

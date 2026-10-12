@@ -90,7 +90,9 @@ class JobStoreBase(ABC):
         pass
 
     @abstractmethod
-    async def reissue_one(self, *, job_id: str, gateway_id: str, now: datetime) -> JobRecord | None:
+    async def reissue_one(
+        self, *, job_id: str, gateway_id: str, attempt_token: str, now: datetime,
+    ) -> JobRecord | None:
         """Immediately reset one ACKNOWLEDGED job back to AVAILABLE, without
         waiting for reissue_orphaned()'s SLA timer - used when the Gateway
         itself reports (POST /gateway/v1/jobs/{jobId}/interrupted, 2.6)
@@ -99,7 +101,8 @@ class JobStoreBase(ABC):
         gateway unreachability. A no-op (returns None) if the job doesn't
         exist, isn't ACKNOWLEDGED, or wasn't acknowledged by this
         gateway_id - this is a best-effort notification, not a strict
-        contract the Gateway must get exactly right."""
+        contract the Gateway must get exactly right. Successful notifications
+        are deduplicated by job, Gateway and attempt for the job's lifetime."""
         pass
 
     @abstractmethod

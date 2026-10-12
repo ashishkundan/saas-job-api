@@ -12,6 +12,8 @@ import pytest
 from saas_job_api.audit import AuditEvent
 from saas_job_api.audit_store_postgres import PostgresAuditLogStore
 from saas_job_api.gateway_operational_config_store_postgres import PostgresGatewayOperationalConfigStore
+from saas_job_api.store_postgres import PostgresJobStore
+from saas_job_api.domain import JobState
 
 _DATABASE_URL = os.environ.get("SAAS_JOB_API_TEST_DATABASE_URL")
 _DATABASE_HOST = urlparse(_DATABASE_URL).hostname if _DATABASE_URL else None
@@ -112,4 +114,52 @@ async def test_postgres_gateway_config_serializes_versions_and_tenant_binding(mo
                 "DELETE FROM gateway_operational_configs WHERE gateway_id = ANY($1::text[])",
                 [gateway_id, failed_gateway_id],
             )
+        await pool.close()
+
+
+@pytest.mark.asyncio
+async def test_postgres_interruption_receipt_survives_restart_and_concurrent_replay() -> None:
+    assert _DATABASE_URL is not None
+    pool = await asyncpg.create_pool(_DATABASE_URL)
+    job_id = f"test-{uuid.uuid4()}"
+    now = datetime.now(timezone.utc)
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO jobs (job_id, job_type, manifest_version, payload, correlation_id, scheduled_at, "
+                "state, ack_gateway_id) VALUES ($1, 'TLS_SCAN', '1.0', '{}', $1, $2, 'ACKNOWLEDGED', 'test-gw')",
+                job_id, now,
+            )
+        store = PostgresJobStore(pool)
+        results = await asyncio.gather(*(
+            store.reissue_one(job_id=job_id, gateway_id="test-gw", attempt_token="attempt-1", now=now)
+            for _ in range(3)
+        ))
+        assert sum(result is not None for result in results) == 1
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE jobs SET state = 'ACKNOWLEDGED', ack_gateway_id = 'test-gw' WHERE job_id = $1", job_id,
+            )
+        restarted = PostgresJobStore(pool)
+        assert await restarted.reissue_one(
+            job_id=job_id, gateway_id="test-gw", attempt_token="attempt-1", now=now,
+        ) is None
+        assert (await restarted.get(job_id)).state == JobState.ACKNOWLEDGED
+        assert await restarted.reissue_one(
+            job_id=job_id, gateway_id="wrong-gw", attempt_token="attempt-2", now=now,
+        ) is None
+        assert await restarted.reissue_one(
+            job_id=job_id, gateway_id="test-gw", attempt_token="attempt-2", now=now,
+        ) is not None
+        async with pool.acquire() as conn:
+            assert await conn.fetchval(
+                "SELECT COUNT(*) FROM job_interruption_receipts WHERE job_id = $1", job_id,
+            ) == 2
+            await conn.execute("DELETE FROM jobs WHERE job_id = $1", job_id)
+            assert await conn.fetchval(
+                "SELECT COUNT(*) FROM job_interruption_receipts WHERE job_id = $1", job_id,
+            ) == 0
+    finally:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM jobs WHERE job_id = $1", job_id)
         await pool.close()

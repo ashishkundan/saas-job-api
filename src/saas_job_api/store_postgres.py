@@ -186,11 +186,20 @@ class PostgresJobStore(JobStoreBase):
             updated_rows = await conn.fetch("SELECT * FROM jobs WHERE job_id = ANY($1)", job_ids)
         return [self._row_to_record(row) for row in updated_rows]
 
-    async def reissue_one(self, *, job_id: str, gateway_id: str, now: datetime) -> JobRecord | None:
+    async def reissue_one(
+        self, *, job_id: str, gateway_id: str, attempt_token: str, now: datetime,
+    ) -> JobRecord | None:
         async with self.pool.acquire() as conn:
             async with conn.transaction():
                 row = await conn.fetchrow("SELECT * FROM jobs WHERE job_id = $1 FOR UPDATE", job_id)
                 if row is None or row["state"] != JobState.ACKNOWLEDGED.value or row["ack_gateway_id"] != gateway_id:
+                    return None
+                consumed = await conn.fetchval(
+                    "INSERT INTO job_interruption_receipts (job_id, gateway_id, attempt_token, received_at) "
+                    "VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING RETURNING job_id",
+                    job_id, gateway_id, attempt_token, now,
+                )
+                if consumed is None:
                     return None
 
                 await conn.execute(
