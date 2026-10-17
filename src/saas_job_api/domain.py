@@ -31,6 +31,11 @@ class JobRecord:
     payload: dict[str, Any]
     max_attempts: int
     trace_id: str | None
+    # Owning customer and the managed Target the job scans. A gateway only
+    # ever claims jobs for its own tenant; a job with no tenant_id (legacy
+    # rows from before migration 010) is never handed to any gateway.
+    tenant_id: str | None = None
+    target_id: str | None = None
     state: JobState = JobState.AVAILABLE
 
     receipt_token: str | None = None

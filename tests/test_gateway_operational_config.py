@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from conftest import job_body, make_test_settings, seed_fixture_tenant_and_target
 from saas_job_api.identity import AdminRole, GatewayIdentity
 from saas_job_api.jwt_tokens import issue_token
 from saas_job_api.tenancy import Tenant
@@ -128,12 +129,16 @@ async def test_disabled_config_holds_new_poll_claims_and_poll_interval_is_return
 ):
     await _create_tenant(app, "tenant-a")
     await _bind_gateway_to_tenant(app, "tenant-a")
+    # The registered identity is now the gateway's only tenant source (the
+    # fixture's config map would otherwise disagree and deny the poll).
+    app.state.settings = make_test_settings(gateway_tenants_json="{}")
+    await seed_fixture_tenant_and_target(app, tenant_id="tenant-a", target_id="target-a")
     platform_headers = _admin_headers(app, AdminRole.PLATFORM_ADMIN)
     path = "/admin/v1/tenants/tenant-a/gateways/gw_test/config"
     seed = await client.post(
         "/admin/jobs",
         headers=admin_headers,
-        json={"jobId": "job-config-pause", "jobType": "tls", "manifestVersion": "1.0"},
+        json=job_body(jobId="job-config-pause", tenantId="tenant-a", targetId="target-a"),
     )
     assert seed.status_code == 200
 

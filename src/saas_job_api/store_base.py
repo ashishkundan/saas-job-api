@@ -49,12 +49,18 @@ class JobStoreBase(ABC):
         self,
         *,
         gateway_id: str,
+        tenant_id: str,
         job_types: list[str] | None,
         manifest_versions: list[str] | None,
         max_jobs: int,
         dispatch_slots: int | None,
     ) -> list[JobRecord]:
-        """Claim up to max_jobs eligible jobs for a gateway. Atomically transitions AVAILABLE→RESERVED."""
+        """Claim up to max_jobs eligible jobs for a gateway. Atomically transitions AVAILABLE→RESERVED.
+
+        Only jobs whose tenant_id equals the gateway's tenant_id are
+        eligible - a gateway can never claim another customer's job, and
+        a job without a tenant_id is never eligible at all. job_types and
+        manifest_versions narrow the selection further when given."""
         pass
 
     @abstractmethod

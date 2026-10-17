@@ -25,6 +25,8 @@ services:
         sync: false
       - key: SAAS_JOB_API_GATEWAY_TOKENS_JSON
         sync: false
+      - key: SAAS_JOB_API_GATEWAY_TENANTS_JSON
+        sync: false
       - key: SAAS_JOB_API_LOG_LEVEL
         value: "INFO"
       - key: SAAS_JOB_API_RESERVATION_TTL_SECONDS

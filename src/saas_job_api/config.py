@@ -8,6 +8,7 @@ from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEV_DEFAULT_TOKENS = '{"dev-gateway-token": "gw_dev_local"}'
+_DEV_DEFAULT_GATEWAY_TENANTS = '{"gw_dev_local": "tenant-dev"}'
 
 
 class Settings(BaseSettings):
@@ -15,6 +16,12 @@ class Settings(BaseSettings):
 
     # JSON object string: {"<bearer-token>": "<gatewayId>"}
     gateway_tokens_json: str = _DEV_DEFAULT_TOKENS
+    # JSON object string: {"<gatewayId>": "<tenantId>"}. Binds each
+    # bearer-token gateway to the one tenant (customer) whose jobs it may
+    # claim. A gateway registered via mTLS carries its tenant on its
+    # GatewayIdentity instead; if both exist they must agree. A gateway
+    # with no tenant at all is refused on poll.
+    gateway_tenants_json: str = _DEV_DEFAULT_GATEWAY_TENANTS
     admin_token: str = "dev-admin-token"
     reservation_ttl_seconds: float = 60.0
     default_max_jobs: int = 20
@@ -81,12 +88,28 @@ class Settings(BaseSettings):
     def gateway_tokens(self) -> dict[str, str]:
         return json.loads(self.gateway_tokens_json)
 
+    @property
+    def gateway_tenants(self) -> dict[str, str]:
+        return json.loads(self.gateway_tenants_json)
+
     @field_validator("gateway_tokens_json")
     @classmethod
     def _validate_json_object(cls, value: str) -> str:
         parsed = json.loads(value)
         if not isinstance(parsed, dict):
             raise ValueError("SAAS_JOB_API_GATEWAY_TOKENS_JSON must be a JSON object")
+        return value
+
+    @field_validator("gateway_tenants_json")
+    @classmethod
+    def _validate_gateway_tenants(cls, value: str) -> str:
+        parsed = json.loads(value)
+        if not isinstance(parsed, dict) or not all(
+            isinstance(k, str) and k and isinstance(v, str) and v for k, v in parsed.items()
+        ):
+            raise ValueError(
+                "SAAS_JOB_API_GATEWAY_TENANTS_JSON must be a JSON object of non-empty gatewayId -> tenantId strings"
+            )
         return value
 
 

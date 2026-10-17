@@ -84,20 +84,30 @@ during an authorized pilot; a completed job is not sufficient proof.
 With the server running (`python scripts/run_dev.py`), here's the full
 seed → poll → acknowledge lifecycle against the dev defaults.
 
-**1. Seed a job** (`X-Admin-Token: dev-admin-token`):
+**1. Seed a job.** Every job belongs to one tenant (customer) and is created
+for one of that tenant's managed Targets: the SaaS derives the plugin,
+endpoint and job type from the Target, and only gateways of that tenant can
+claim it. The dev gateway `gw_dev_local` belongs to `tenant-dev`; create the
+tenant and a target first (commands in `scripts/run_dev.py`), then:
 
 ```bash
 curl -s -i -X POST http://127.0.0.1:8000/admin/jobs \
   -H "X-Admin-Token: dev-admin-token" -H "Content-Type: application/json" \
-  -d '{"jobType": "TLS_SCAN", "manifestVersion": "1.0", "payload": {"targetRef": "device_441", "credentialsRef": "cred_778"}}'
+  -d '{"tenantId": "tenant-dev", "targetId": "dev-target"}'
 ```
 
 ```
 HTTP/1.1 200 OK
 content-type: application/json
 
-{"jobId":"job_22e1a9574943","state":"AVAILABLE"}
+{"jobId":"job_22e1a9574943","state":"AVAILABLE","jobType":"tls-scanner-scan","tenantId":"tenant-dev","targetId":"dev-target"}
 ```
+
+`POST /admin/jobs` fields: `tenantId` and `targetId` (required), and the
+optional `jobId`, `jobType` (must equal `<pluginRef>-scan` if given),
+`manifestVersion` (default `1.0`), `priority`, `scheduledAt`, `correlationId`,
+`traceId`, `maxAttempts` and `timeoutSeconds` (1-3600). A free-form `payload`
+is rejected. An unknown tenant, or a target outside that tenant, returns 404.
 
 **2. Poll for it** (`Authorization: Bearer dev-gateway-token`) — reserves the
 job for `reservation_ttl_seconds` (default 60s) and mints a `receiptToken`:
@@ -250,6 +260,7 @@ This implementation supports production deployment on [Render.com](https://rende
 3. **Set environment variables** (in Render dashboard after creating the blueprint):
    - `SAAS_JOB_API_ADMIN_TOKEN` — Generate a strong random token (e.g., `$(python -c 'import secrets; print(secrets.token_urlsafe(32))')`)
    - `SAAS_JOB_API_GATEWAY_TOKENS_JSON` — JSON map of tokens to gateway IDs, e.g. `{"your-token":"gw_prod_1"}`
+   - `SAAS_JOB_API_GATEWAY_TENANTS_JSON` — JSON map of gateway IDs to the tenant (customer) each may claim jobs for, e.g. `{"gw_prod_1":"tenant-001"}`. **Required:** a gateway with no tenant gets `403` on poll, and a gateway only ever receives jobs whose `tenantId` matches its own.
 
 4. **Deploy**:
    - Click "Deploy blueprint"

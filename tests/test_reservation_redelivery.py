@@ -10,7 +10,12 @@ from saas_job_api.store import MemoryJobStore
 from saas_job_api.time_provider import FakeClock
 
 
-def make_record(job_id: str, *, priority: int = 50, scheduled_at: datetime | None = None) -> JobRecord:
+TENANT = "tenant-1"
+
+
+def make_record(
+    job_id: str, *, priority: int = 50, scheduled_at: datetime | None = None, tenant_id: str | None = TENANT
+) -> JobRecord:
     return JobRecord(
         job_id=job_id,
         job_type="TLS_SCAN",
@@ -21,6 +26,7 @@ def make_record(job_id: str, *, priority: int = 50, scheduled_at: datetime | Non
         payload={},
         max_attempts=8,
         trace_id=None,
+        tenant_id=tenant_id,
     )
 
 
@@ -38,7 +44,7 @@ async def test_claim_reserves_with_ttl(store: MemoryJobStore, clock: FakeClock):
     await store.seed(make_record("job_1"))
 
     [claimed] = await store.claim(
-        gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
+        gateway_id="gw_a", tenant_id=TENANT, job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
     )
 
     assert claimed.state == JobState.RESERVED
@@ -49,10 +55,10 @@ async def test_claim_reserves_with_ttl(store: MemoryJobStore, clock: FakeClock):
 
 async def test_reserved_job_excluded_before_expiry(store: MemoryJobStore):
     await store.seed(make_record("job_1"))
-    await store.claim(gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None)
+    await store.claim(gateway_id="gw_a", tenant_id=TENANT, job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None)
 
     second_claim = await store.claim(
-        gateway_id="gw_b", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
+        gateway_id="gw_b", tenant_id=TENANT, job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
     )
 
     assert second_claim == []
@@ -61,13 +67,13 @@ async def test_reserved_job_excluded_before_expiry(store: MemoryJobStore):
 async def test_expired_reservation_is_redelivered_with_new_token(store: MemoryJobStore, clock: FakeClock):
     await store.seed(make_record("job_1"))
     [first] = await store.claim(
-        gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
+        gateway_id="gw_a", tenant_id=TENANT, job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
     )
     old_token = first.receipt_token
 
     clock.advance(61)
     [redelivered] = await store.claim(
-        gateway_id="gw_b", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
+        gateway_id="gw_b", tenant_id=TENANT, job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
     )
 
     assert redelivered.job_id == "job_1"
@@ -79,12 +85,12 @@ async def test_expired_reservation_is_redelivered_with_new_token(store: MemoryJo
 async def test_ack_with_stale_token_after_redelivery_is_conflict(store: MemoryJobStore, clock: FakeClock):
     await store.seed(make_record("job_1"))
     [first] = await store.claim(
-        gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
+        gateway_id="gw_a", tenant_id=TENANT, job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
     )
     old_token = first.receipt_token
 
     clock.advance(61)
-    await store.claim(gateway_id="gw_b", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None)
+    await store.claim(gateway_id="gw_b", tenant_id=TENANT, job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None)
 
     with pytest.raises(ConflictError):
         await store.acknowledge(
@@ -100,7 +106,7 @@ async def test_ack_with_stale_token_after_redelivery_is_conflict(store: MemoryJo
 async def test_ack_with_current_token_succeeds_and_is_idempotent(store: MemoryJobStore, clock: FakeClock):
     await store.seed(make_record("job_1"))
     [claimed] = await store.claim(
-        gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
+        gateway_id="gw_a", tenant_id=TENANT, job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
     )
 
     first_ack = await store.acknowledge(
@@ -140,7 +146,7 @@ async def test_ack_unknown_job_is_conflict(store: MemoryJobStore, clock: FakeClo
 async def test_ack_wrong_gateway_is_conflict(store: MemoryJobStore, clock: FakeClock):
     await store.seed(make_record("job_1"))
     [claimed] = await store.claim(
-        gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
+        gateway_id="gw_a", tenant_id=TENANT, job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
     )
 
     with pytest.raises(ConflictError):
@@ -162,7 +168,7 @@ async def test_job_type_and_manifest_version_filtering(store: MemoryJobStore):
     await store.seed(other)
 
     claimed = await store.claim(
-        gateway_id="gw_a",
+        gateway_id="gw_a", tenant_id=TENANT,
         job_types=["TLS_SCAN"],
         manifest_versions=None,
         max_jobs=10,
@@ -177,7 +183,7 @@ async def test_max_jobs_and_dispatch_slots_bound_the_batch(store: MemoryJobStore
         await store.seed(make_record(f"job_{i}"))
 
     claimed = await store.claim(
-        gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=2
+        gateway_id="gw_a", tenant_id=TENANT, job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=2
     )
 
     assert len(claimed) == 2
@@ -190,8 +196,42 @@ async def test_priority_then_scheduled_at_ordering(store: MemoryJobStore):
     await store.seed(make_record("high_later", priority=90, scheduled_at=now.replace(microsecond=0)))
 
     claimed = await store.claim(
-        gateway_id="gw_a", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
+        gateway_id="gw_a", tenant_id=TENANT, job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
     )
 
     assert claimed[0].priority == 90
     assert claimed[-1].job_id == "low"
+
+
+async def test_a_gateway_only_claims_jobs_of_its_own_tenant(store: MemoryJobStore):
+    await store.seed(make_record("mine", tenant_id="tenant-1"))
+    await store.seed(make_record("theirs", tenant_id="tenant-2"))
+
+    claimed = await store.claim(
+        gateway_id="gw_a", tenant_id="tenant-1", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
+    )
+
+    assert [j.job_id for j in claimed] == ["mine"]
+    assert (await store.get("theirs")).state == JobState.AVAILABLE
+
+
+async def test_an_expired_reservation_is_never_redelivered_across_tenants(store: MemoryJobStore, clock: FakeClock):
+    await store.seed(make_record("job_1", tenant_id="tenant-1"))
+    await store.claim(gateway_id="gw_a", tenant_id="tenant-1", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None)
+
+    clock.advance(61)
+    foreign = await store.claim(
+        gateway_id="gw_x", tenant_id="tenant-2", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
+    )
+
+    assert foreign == []
+
+
+async def test_a_job_without_a_tenant_is_never_claimed(store: MemoryJobStore):
+    await store.seed(make_record("legacy", tenant_id=None))
+
+    claimed = await store.claim(
+        gateway_id="gw_a", tenant_id="tenant-1", job_types=None, manifest_versions=None, max_jobs=10, dispatch_slots=None
+    )
+
+    assert claimed == []

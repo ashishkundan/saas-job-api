@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
-from conftest import DEV_GATEWAY_ID
+from conftest import DEV_GATEWAY_ID, job_body
 from saas_job_api.identity import AdminPrincipal, AdminRole
 from saas_job_api.passwords import hash_password
 
@@ -158,7 +158,7 @@ async def test_schedule_create_and_delete_are_audited(client, tenant_a, tenant_a
 
 
 async def _seed_claim_and_ack(client, admin_headers, gateway_headers, **job_overrides):
-    body = {"jobType": "TLS_SCAN", "manifestVersion": "1.0"}
+    body = job_body()
     body.update(job_overrides)
     seed_resp = await client.post("/admin/jobs", json=body, headers=admin_headers)
     job_id = seed_resp.json()["jobId"]

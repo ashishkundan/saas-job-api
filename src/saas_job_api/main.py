@@ -78,6 +78,7 @@ async def _bootstrap_admin_principal(rbac_store, cfg: Settings) -> None:
 async def _load_seed_file(store, path: str) -> None:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     for item in data:
+        payload = item.get("payload", {})
         record = JobRecord(
             job_id=item.get("jobId") or new_job_id(),
             job_type=item["jobType"],
@@ -85,9 +86,12 @@ async def _load_seed_file(store, path: str) -> None:
             priority=item.get("priority", 50),
             scheduled_at=datetime.fromisoformat(item["scheduledAt"]) if item.get("scheduledAt") else datetime.now(timezone.utc),
             correlation_id=item.get("correlationId") or new_correlation_id(),
-            payload=item.get("payload", {}),
+            payload=payload,
             max_attempts=item.get("maxAttempts", 8),
             trace_id=item.get("traceId"),
+            # A seeded job without a tenant is stored but never claimable.
+            tenant_id=item.get("tenantId") or payload.get("tenantId"),
+            target_id=item.get("targetId") or payload.get("targetId"),
         )
         await store.seed(record)
 

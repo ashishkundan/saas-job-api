@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from conftest import DEV_GATEWAY_ID
+from conftest import DEV_GATEWAY_ID, job_body
 
 
 async def _seed_and_claim(client, admin_headers, gateway_headers):
     seed_resp = await client.post(
-        "/admin/jobs", json={"jobType": "TLS_SCAN", "manifestVersion": "1.0"}, headers=admin_headers
+        "/admin/jobs", json=job_body(), headers=admin_headers
     )
     job_id = seed_resp.json()["jobId"]
 

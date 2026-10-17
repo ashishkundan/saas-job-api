@@ -32,8 +32,8 @@ class PostgresJobStore(JobStoreBase):
                 await conn.execute(
                     "INSERT INTO jobs (job_id, job_type, manifest_version, priority, payload, "
                     "max_attempts, state, correlation_id, trace_id, scheduled_at, "
-                    "acknowledged_receipts, created_at, updated_at) "
-                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)",
+                    "acknowledged_receipts, created_at, updated_at, tenant_id, target_id) "
+                    "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, $14)",
                     record.job_id,
                     record.job_type,
                     record.manifest_version,
@@ -46,6 +46,8 @@ class PostgresJobStore(JobStoreBase):
                     record.scheduled_at,
                     json.dumps([]),
                     datetime.now(tz=None),
+                    record.tenant_id,
+                    record.target_id,
                 )
             except asyncpg.UniqueViolationError:
                 raise ValueError(f"job_id already exists: {record.job_id}")
@@ -80,6 +82,7 @@ class PostgresJobStore(JobStoreBase):
         self,
         *,
         gateway_id: str,
+        tenant_id: str,
         job_types: list[str] | None,
         manifest_versions: list[str] | None,
         max_jobs: int,
@@ -92,11 +95,16 @@ class PostgresJobStore(JobStoreBase):
 
         async with self.pool.acquire() as conn:
             async with conn.transaction():
+                # tenant_id = $3 also excludes NULL-tenant (legacy) rows,
+                # since NULL never compares equal.
                 rows = await conn.fetch(
                     "SELECT * FROM jobs WHERE (state = 'AVAILABLE' OR "
                     "(state = 'RESERVED' AND reservation_until <= $2)) "
+                    "AND tenant_id = $3 "
+                    "AND ($4::text[] IS NULL OR job_type = ANY($4::text[])) "
+                    "AND ($5::text[] IS NULL OR manifest_version = ANY($5::text[])) "
                     "ORDER BY priority DESC, scheduled_at ASC, job_id ASC LIMIT $1 FOR UPDATE",
-                    limit, now
+                    limit, now, tenant_id, job_types, manifest_versions
                 )
 
                 chosen_ids = [row["job_id"] for row in rows]
@@ -243,6 +251,8 @@ class PostgresJobStore(JobStoreBase):
             payload=json.loads(row["payload"]),
             max_attempts=row["max_attempts"],
             trace_id=row["trace_id"],
+            tenant_id=row["tenant_id"],
+            target_id=row["target_id"],
             state=JobState(row["state"]),
             receipt_token=row["receipt_token"],
             reserved_by=row["reserved_by"],

@@ -21,6 +21,7 @@ from ..schedule_store_base import ScheduleStoreBase
 from ..store import new_correlation_id, new_job_id
 from ..store_base import JobStoreBase
 from ..target_store_base import TargetStoreBase
+from ..tenancy import build_target_job_payload
 from ..time_provider import Clock
 
 logger = logging.getLogger(__name__)
@@ -76,17 +77,11 @@ async def run_scheduler_tick(
             priority=DEFAULT_JOB_PRIORITY,
             scheduled_at=now,
             correlation_id=new_correlation_id(),
-            payload={
-                "pluginRef": target.plugin_ref,
-                "pluginVersion": target.plugin_version,
-                "targetEndpoint": f"{target.host}:{target.port}",
-                "credentialRef": target.credential_ref,
-                "tenantId": schedule.tenant_id,
-                "targetId": target.target_id,
-                "scheduleId": schedule.schedule_id,
-            },
+            payload=build_target_job_payload(target, scheduleId=schedule.schedule_id),
             max_attempts=DEFAULT_JOB_MAX_ATTEMPTS,
             trace_id=None,
+            tenant_id=target.tenant_id,
+            target_id=target.target_id,
         )
         await job_store.seed(record)
         created += 1

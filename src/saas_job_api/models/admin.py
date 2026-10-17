@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class AdminCreateJobRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    """A job is always created for one tenant's managed Target. The
+    execution payload (pluginRef, pluginVersion, targetEndpoint,
+    credentialRef) is derived from that Target, never accepted from the
+    caller - extra="forbid" rejects a free-form `payload` with 422."""
 
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    tenant_id: str = Field(alias="tenantId", min_length=1, max_length=50)
+    target_id: str = Field(alias="targetId", min_length=1, max_length=50)
     job_id: str | None = Field(default=None, alias="jobId")
-    job_type: str = Field(alias="jobType")
-    manifest_version: str = Field(alias="manifestVersion")
+    # Defaults to "<pluginRef>-scan" from the Target; if given it must match.
+    job_type: str | None = Field(default=None, alias="jobType")
+    manifest_version: str = Field(default="1.0", alias="manifestVersion")
     priority: int = 50
     scheduled_at: datetime | None = Field(default=None, alias="scheduledAt")
     correlation_id: str | None = Field(default=None, alias="correlationId")
-    payload: dict[str, Any] = Field(default_factory=dict)
+    timeout_seconds: int | None = Field(default=None, alias="timeoutSeconds", ge=1, le=3600)
     max_attempts: int = Field(default=8, alias="maxAttempts")
     trace_id: str | None = Field(default=None, alias="traceId")
 

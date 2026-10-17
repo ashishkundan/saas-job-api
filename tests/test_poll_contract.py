@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from conftest import DEV_GATEWAY_ID
+from conftest import DEV_GATEWAY_ID, TEST_JOB_TYPE, job_body
 
 
 async def _seed_job(client, admin_headers, **overrides):
-    body = {"jobType": "TLS_SCAN", "manifestVersion": "1.0"}
+    body = job_body()
     body.update(overrides)
     resp = await client.post("/admin/jobs", json=body, headers=admin_headers)
     assert resp.status_code == 200
@@ -20,7 +20,7 @@ async def test_full_tdd_shaped_poll_returns_matching_jobs(client, admin_headers,
             "requestId": "req_1",
             "gatewayId": DEV_GATEWAY_ID,
             "maxJobs": 20,
-            "supportedJobTypes": ["TLS_SCAN"],
+            "supportedJobTypes": [TEST_JOB_TYPE],
             "supportedManifestVersions": ["1.0"],
             "availableDispatchSlots": 8,
             "clientTime": "2026-08-02T01:30:00Z",
@@ -36,7 +36,7 @@ async def test_full_tdd_shaped_poll_returns_matching_jobs(client, admin_headers,
     assert "reservationUntil" in payload
     assert len(payload["jobs"]) == 1
     job = payload["jobs"][0]
-    assert job["jobType"] == "TLS_SCAN"
+    assert job["jobType"] == TEST_JOB_TYPE
     assert job["manifestVersion"] == "1.0"
     assert job["receiptToken"]
 

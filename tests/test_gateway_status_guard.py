@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from conftest import DEV_GATEWAY_ID
+from conftest import DEV_GATEWAY_ID, job_body
 
 from saas_job_api.health import GatewayStatus, HealthState
 
@@ -15,7 +15,7 @@ POLL_BODY = {"maxJobs": 20}
 
 
 async def _seed_job(client, admin_headers, **overrides):
-    body = {"jobType": "TLS_SCAN", "manifestVersion": "1.0"}
+    body = job_body()
     body.update(overrides)
     resp = await client.post("/admin/jobs", json=body, headers=admin_headers)
     assert resp.status_code == 200

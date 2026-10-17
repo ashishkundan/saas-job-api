@@ -36,6 +36,28 @@ async def authenticated_gateway(
     return gateway_id
 
 
+async def resolve_gateway_tenant(request: Request, gateway_id: str) -> str:
+    """Return the one tenant this gateway may claim jobs for.
+
+    Sources: the registered GatewayIdentity.tenant_id (mTLS-registered
+    gateways) and the SAAS_JOB_API_GATEWAY_TENANTS_JSON map (bearer-token
+    gateways). If both are present they must agree. A gateway with no
+    tenant is refused (403) rather than served unscoped work."""
+    configured = get_settings(request).gateway_tenants.get(gateway_id)
+    registered: str | None = None
+    registration_store = getattr(request.app.state, "registration_store", None)
+    if registration_store is not None:
+        identity = await registration_store.get_gateway_identity(gateway_id)
+        if identity is not None:
+            registered = identity.tenant_id
+    if configured and registered and configured != registered:
+        raise ForbiddenError()
+    tenant_id = registered or configured
+    if not tenant_id:
+        raise ForbiddenError()
+    return tenant_id
+
+
 def bind_gateway_id(body_gateway_id: str | None, token_gateway_id: str) -> str:
     if body_gateway_id is not None and body_gateway_id != token_gateway_id:
         raise ForbiddenError()

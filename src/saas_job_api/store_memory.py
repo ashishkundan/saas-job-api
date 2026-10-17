@@ -67,6 +67,7 @@ class MemoryJobStore(JobStoreBase):
         self,
         *,
         gateway_id: str,
+        tenant_id: str,
         job_types: list[str] | None,
         manifest_versions: list[str] | None,
         max_jobs: int,
@@ -78,6 +79,8 @@ class MemoryJobStore(JobStoreBase):
                 job
                 for job in self._jobs.values()
                 if job.is_eligible(now)
+                and job.tenant_id is not None
+                and job.tenant_id == tenant_id
                 and (job_types is None or job.job_type in job_types)
                 and (manifest_versions is None or job.manifest_version in manifest_versions)
             ]

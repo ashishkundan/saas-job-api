@@ -82,6 +82,11 @@ async def test_run_scheduler_tick_creates_a_job_for_a_due_schedule() -> None:
     assert job.payload["targetEndpoint"] == "10.0.0.5:443"
     assert job.payload["credentialRef"] == "site42-creds"
     assert job.payload["scheduleId"] == "sched-1"
+    # The job is owned by the schedule's tenant, so only that tenant's
+    # gateways can claim it.
+    assert job.tenant_id == job.payload["tenantId"]
+    assert job.target_id == job.payload["targetId"]
+    assert job.tenant_id is not None
 
 
 async def test_run_scheduler_tick_skips_a_schedule_not_yet_due() -> None:
@@ -214,9 +219,13 @@ async def _seeded_and_acknowledged_job(job_store: MemoryJobStore, *, gateway_id:
         payload={},
         max_attempts=8,
         trace_id=None,
+        tenant_id="tenant-1",
+        target_id="target-1",
     )
     await job_store.seed(record)
-    claimed = await job_store.claim(gateway_id=gateway_id, job_types=None, manifest_versions=None, max_jobs=1, dispatch_slots=None)
+    claimed = await job_store.claim(
+        gateway_id=gateway_id, tenant_id="tenant-1", job_types=None, manifest_versions=None, max_jobs=1, dispatch_slots=None
+    )
     job = claimed[0]
     return await job_store.acknowledge(
         job_id=job.job_id,
@@ -332,6 +341,16 @@ async def test_reissued_job_becomes_claimable_by_a_different_gateway() -> None:
     )
     assert reissued == 1
 
-    claimed = await job_store.claim(gateway_id="gw-new", job_types=None, manifest_versions=None, max_jobs=1, dispatch_slots=None)
+    # A gateway of a different tenant still can't take it...
+    other_tenant = await job_store.claim(
+        gateway_id="gw-foreign", tenant_id="tenant-2", job_types=None, manifest_versions=None, max_jobs=1, dispatch_slots=None
+    )
+    assert other_tenant == []
+
+    # ...but a replacement gateway of the same tenant can.
+    claimed = await job_store.claim(
+        gateway_id="gw-new", tenant_id="tenant-1", job_types=None, manifest_versions=None, max_jobs=1, dispatch_slots=None
+    )
     assert len(claimed) == 1
     assert claimed[0].job_id == "job-1"
+    assert claimed[0].tenant_id == "tenant-1"

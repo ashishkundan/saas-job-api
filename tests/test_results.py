@@ -7,7 +7,15 @@ import json
 import httpx
 import pytest
 
-from conftest import DEV_GATEWAY_ID, DEV_TOKEN, make_test_settings
+from conftest import (
+    DEV_GATEWAY_ID,
+    DEV_TOKEN,
+    TEST_TARGET_ID,
+    TEST_TENANT_ID,
+    job_body,
+    make_test_settings,
+    seed_fixture_tenant_and_target,
+)
 from saas_job_api.domain import JobState
 from saas_job_api.main import create_app
 
@@ -22,7 +30,7 @@ CERT = {
 
 
 async def _seed_claim_and_ack(client, admin_headers, gateway_headers, **job_overrides):
-    body = {"jobType": "TLS_SCAN", "manifestVersion": "1.0"}
+    body = job_body()
     body.update(job_overrides)
     seed_resp = await client.post("/admin/jobs", json=body, headers=admin_headers)
     job_id = seed_resp.json()["jobId"]
@@ -86,9 +94,7 @@ async def test_submit_result_does_not_duplicate_inventory_rows(client, admin_hea
 
 
 async def test_submit_result_records_tenant_and_target_from_job_payload(client, admin_headers, gateway_headers, app) -> None:
-    job_id = await _seed_claim_and_ack(
-        client, admin_headers, gateway_headers, payload={"tenantId": "tenant-42", "targetId": "target-7"}
-    )
+    job_id = await _seed_claim_and_ack(client, admin_headers, gateway_headers)
 
     await client.post(
         f"/gateway/v1/jobs/{job_id}/results",
@@ -96,9 +102,9 @@ async def test_submit_result_records_tenant_and_target_from_job_payload(client, 
         headers=gateway_headers,
     )
 
-    inventory = await app.state.inventory_store.list_by_tenant("tenant-42", limit=10)
+    inventory = await app.state.inventory_store.list_by_tenant(TEST_TENANT_ID, limit=10)
     assert len(inventory) == 1
-    assert inventory[0].target_id == "target-7"
+    assert inventory[0].target_id == TEST_TARGET_ID
     assert inventory[0].fingerprint == "abc123"
 
 
@@ -146,10 +152,12 @@ async def test_submit_result_from_a_different_gateway_is_409() -> None:
     other_gateway_id = "gw_other"
     app = create_app(
         settings=make_test_settings(
-            gateway_tokens_json=json.dumps({DEV_TOKEN: DEV_GATEWAY_ID, other_token: other_gateway_id})
+            gateway_tokens_json=json.dumps({DEV_TOKEN: DEV_GATEWAY_ID, other_token: other_gateway_id}),
+            gateway_tenants_json=json.dumps({DEV_GATEWAY_ID: TEST_TENANT_ID, other_gateway_id: TEST_TENANT_ID}),
         )
     )
     async with app.router.lifespan_context(app):
+        await seed_fixture_tenant_and_target(app)
         transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             admin_headers = {"X-Admin-Token": "test-admin-token"}
@@ -190,7 +198,7 @@ async def test_report_interrupted_job_becomes_claimable_again(client, admin_head
 
 
 async def test_report_interrupted_for_a_not_acknowledged_job_is_a_noop(client, admin_headers, gateway_headers) -> None:
-    seed_resp = await client.post("/admin/jobs", json={"jobType": "TLS_SCAN", "manifestVersion": "1.0"}, headers=admin_headers)
+    seed_resp = await client.post("/admin/jobs", json=job_body(), headers=admin_headers)
     job_id = seed_resp.json()["jobId"]
 
     resp = await client.post(

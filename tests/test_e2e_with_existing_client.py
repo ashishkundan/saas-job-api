@@ -30,7 +30,13 @@ import httpx
 import pytest
 import uvicorn
 
-from conftest import PARENT_CLIENT_AVAILABLE, make_test_settings
+from conftest import (
+    PARENT_CLIENT_AVAILABLE,
+    TEST_TENANT_ID,
+    job_body,
+    make_test_settings,
+    seed_fixture_tenant_and_target,
+)
 from saas_job_api.main import create_app
 
 pytestmark = pytest.mark.skipif(
@@ -52,7 +58,13 @@ class ServerThread(threading.Thread):
         self.server = uvicorn.Server(config)
 
     def run(self) -> None:
-        asyncio.run(self.server.serve())
+        self.loop = asyncio.new_event_loop()
+        self.loop.run_until_complete(self.server.serve())
+
+    def call(self, coro, timeout: float = 5.0):
+        """Run a coroutine on the server's own event loop (its stores'
+        asyncio locks belong to that loop)."""
+        return asyncio.run_coroutine_threadsafe(coro, self.loop).result(timeout)
 
     def wait_until_started(self, timeout: float = 5.0) -> None:
         import time
@@ -73,12 +85,14 @@ def live_server():
     app = create_app(
         settings=make_test_settings(
             gateway_tokens_json=f'{{"{DEV_TOKEN}": "{DEV_GATEWAY_ID}"}}',
+            gateway_tenants_json=f'{{"{DEV_GATEWAY_ID}": "{TEST_TENANT_ID}"}}',
             admin_token=ADMIN_TOKEN,
         )
     )
     thread = ServerThread(app)
     thread.start()
     thread.wait_until_started()
+    thread.call(seed_fixture_tenant_and_target(app))
     yield
     thread.stop()
 
@@ -90,7 +104,7 @@ async def test_real_client_can_poll_and_acknowledge(live_server):
     async with httpx.AsyncClient(base_url=BASE_URL) as admin_client:
         seed_resp = await admin_client.post(
             "/admin/jobs",
-            json={"jobType": "TLS_SCAN", "manifestVersion": "1.0"},
+            json=job_body(),
             headers={"X-Admin-Token": ADMIN_TOKEN},
         )
         assert seed_resp.status_code == 200

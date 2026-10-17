@@ -19,7 +19,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, Request, Response
 
-from ..auth import authenticated_gateway, bind_gateway_id, get_settings
+from ..auth import authenticated_gateway, bind_gateway_id, get_settings, resolve_gateway_tenant
 from ..errors import BadRequestError
 from ..health import HealthState, derive_current_status
 from ..health_store_base import HealthStoreBase
@@ -56,6 +56,7 @@ async def poll_jobs(
     gateway_id: str = Depends(authenticated_gateway),
 ):
     bind_gateway_id(body.gateway_id, gateway_id)
+    tenant_id = await resolve_gateway_tenant(request, gateway_id)
 
     fault = await store.take_fault()
     if fault is not None:
@@ -109,6 +110,7 @@ async def poll_jobs(
 
     chosen = await store.claim(
         gateway_id=gateway_id,
+        tenant_id=tenant_id,
         job_types=body.supported_job_types,
         manifest_versions=body.supported_manifest_versions,
         max_jobs=body.max_jobs,
