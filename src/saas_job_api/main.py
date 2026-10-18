@@ -31,10 +31,12 @@ from .rbac_store_memory import MemoryRbacStore
 from .rbac_store_postgres import PostgresRbacStore
 from .registration_store_memory import MemoryRegistrationStore
 from .registration_store_postgres import PostgresRegistrationStore
-from .routers import admin, admin_auth, audit, gateway, gateway_config, heartbeat, registration, results, schedules, targets, tenants
+from .routers import admin, admin_auth, audit, gateway, gateway_config, heartbeat, plugins, registration, results, schedules, targets, tenants
 from .schedule_store_memory import MemoryScheduleStore
 from .schedule_store_postgres import PostgresScheduleStore
 from .store import create_store, close_store, new_job_id, new_correlation_id
+from .plugin_store_memory import MemoryPluginStore
+from .plugin_store_postgres import PostgresPluginStore
 from .target_store_memory import MemoryTargetStore
 from .target_store_postgres import PostgresTargetStore
 from .tenant_store_memory import MemoryTenantStore
@@ -118,6 +120,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
             app.state.health_store = PostgresHealthStore(pool)
             app.state.tenant_store = PostgresTenantStore(pool)
             app.state.target_store = PostgresTargetStore(pool)
+            app.state.plugin_store = PostgresPluginStore(pool)
             app.state.schedule_store = PostgresScheduleStore(pool)
             app.state.inventory_store = PostgresInventoryStore(pool)
             app.state.audit_store = PostgresAuditLogStore(pool)
@@ -128,6 +131,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
             app.state.health_store = MemoryHealthStore()
             app.state.tenant_store = MemoryTenantStore()
             app.state.target_store = MemoryTargetStore()
+            app.state.plugin_store = MemoryPluginStore()
             app.state.schedule_store = MemoryScheduleStore()
             app.state.inventory_store = MemoryInventoryStore()
             app.state.audit_store = MemoryAuditLogStore()
@@ -143,6 +147,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
                 start_scheduler_loop(
                     schedule_store=app.state.schedule_store,
                     target_store=app.state.target_store,
+                    plugin_store=app.state.plugin_store,
                     job_store=app.state.store,
                     health_store=app.state.health_store,
                     clock=app.state.clock,
@@ -188,6 +193,9 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
     app.include_router(heartbeat.router)
     app.include_router(tenants.router)
     app.include_router(targets.router)
+    app.include_router(plugins.gateway_router)
+    app.include_router(plugins.upload_router)
+    app.include_router(plugins.entitlement_router)
     app.include_router(schedules.router)
     app.include_router(results.router)
     app.include_router(audit.router)

@@ -17,6 +17,7 @@ import logging
 from ..domain import JobRecord
 from ..health import HealthState, derive_current_status
 from ..health_store_base import HealthStoreBase
+from ..plugin_store_base import PluginStoreBase
 from ..schedule_store_base import ScheduleStoreBase
 from ..store import new_correlation_id, new_job_id
 from ..store_base import JobStoreBase
@@ -41,6 +42,7 @@ async def run_scheduler_tick(
     job_store: JobStoreBase,
     clock: Clock,
     limit: int = DEFAULT_CLAIM_LIMIT,
+    plugin_store: PluginStoreBase | None = None,
 ) -> int:
     """Claim every currently-due schedule and create one JobRecord per
     claim, shaped to match the Gateway VM's own job-payload contract
@@ -69,6 +71,14 @@ async def run_scheduler_tick(
                 schedule.target_id,
             )
             continue
+        if plugin_store is not None and not await plugin_store.is_entitled(target.tenant_id, target.plugin_ref):
+            # The tenant's entitlement was revoked after the target was
+            # created: stop producing jobs for that plugin.
+            logger.warning(
+                "scheduler_tick: tenant '%s' is not entitled to plugin '%s' - schedule '%s' skipped",
+                target.tenant_id, target.plugin_ref, schedule.schedule_id,
+            )
+            continue
 
         record = JobRecord(
             job_id=new_job_id(),
@@ -77,7 +87,11 @@ async def run_scheduler_tick(
             priority=DEFAULT_JOB_PRIORITY,
             scheduled_at=now,
             correlation_id=new_correlation_id(),
-            payload=build_target_job_payload(target, scheduleId=schedule.schedule_id),
+            # The schedule interval doubles as the gateway's grace period
+            # for running a cached plugin while signed metadata is stale.
+            payload=build_target_job_payload(
+                target, scheduleId=schedule.schedule_id, scheduleIntervalSeconds=schedule.interval_seconds
+            ),
             max_attempts=DEFAULT_JOB_MAX_ATTEMPTS,
             trace_id=None,
             tenant_id=target.tenant_id,
@@ -148,6 +162,7 @@ async def start_scheduler_loop(
     health_store: HealthStoreBase,
     clock: Clock,
     shutdown_event: asyncio.Event,
+    plugin_store: PluginStoreBase | None = None,
     interval_seconds: float = DEFAULT_TICK_INTERVAL_SECONDS,
     orphaned_job_sla_seconds: float = DEFAULT_ORPHANED_JOB_SLA_SECONDS,
     gateway_degraded_after_seconds: float = 90.0,
@@ -163,7 +178,8 @@ async def start_scheduler_loop(
     while not shutdown_event.is_set():
         try:
             await run_scheduler_tick(
-                schedule_store=schedule_store, target_store=target_store, job_store=job_store, clock=clock
+                schedule_store=schedule_store, target_store=target_store, job_store=job_store, clock=clock,
+                plugin_store=plugin_store,
             )
         except Exception:
             logger.exception("scheduler_tick: schedule tick failed")

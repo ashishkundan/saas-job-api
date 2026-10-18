@@ -70,6 +70,7 @@ async def seed_fixture_tenant_and_target(app, *, tenant_id: str = TEST_TENANT_ID
                 created_at=now,
             )
         )
+    await app.state.plugin_store.grant(tenant_id, TEST_PLUGIN_REF, now=now)
 
 
 def job_body(**overrides: object) -> dict[str, object]:

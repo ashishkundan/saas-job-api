@@ -15,6 +15,7 @@ from ..auth import require_admin_token
 from ..domain import JobRecord
 from ..errors import BadRequestError, NotFoundError
 from ..models.admin import AdminCreateJobRequest, FaultInjectionRequest
+from ..plugin_store_base import PluginStoreBase
 from ..store import new_correlation_id, new_job_id
 from ..store_base import JobStoreBase
 from ..target_store_base import TargetStoreBase
@@ -36,12 +37,17 @@ def get_target_store(request: Request) -> TargetStoreBase:
     return request.app.state.target_store
 
 
+def get_plugin_store(request: Request) -> PluginStoreBase:
+    return request.app.state.plugin_store
+
+
 @router.post("/jobs")
 async def create_job(
     body: AdminCreateJobRequest,
     store: JobStoreBase = Depends(get_store),
     tenant_store: TenantStoreBase = Depends(get_tenant_store),
     target_store: TargetStoreBase = Depends(get_target_store),
+    plugin_store: PluginStoreBase = Depends(get_plugin_store),
 ):
     tenant = await tenant_store.get(body.tenant_id)
     if tenant is None:
@@ -51,6 +57,9 @@ async def create_job(
     target = await target_store.get(body.tenant_id, body.target_id)
     if target is None:
         raise NotFoundError(f"target not found: {body.target_id}")
+
+    if not await plugin_store.is_entitled(target.tenant_id, target.plugin_ref):
+        raise BadRequestError(f"tenant {target.tenant_id} is not entitled to plugin {target.plugin_ref}")
 
     expected_job_type = default_job_type(target)
     if body.job_type is not None and body.job_type != expected_job_type:

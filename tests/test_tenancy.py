@@ -45,6 +45,10 @@ async def platform_admin_token(app, client: httpx.AsyncClient) -> str:
 async def tenant_a(client: httpx.AsyncClient, platform_admin_token: str) -> dict:
     resp = await client.post("/admin/v1/tenants", json={"name": "Tenant A"}, headers=_auth(platform_admin_token))
     assert resp.status_code == 200, resp.text
+    granted = await client.put(
+        f"/admin/v1/tenants/{resp.json()['tenantId']}/plugins/tls-scanner", headers=_auth(platform_admin_token)
+    )
+    assert granted.status_code == 200, granted.text
     return resp.json()
 
 
@@ -52,6 +56,10 @@ async def tenant_a(client: httpx.AsyncClient, platform_admin_token: str) -> dict
 async def tenant_b(client: httpx.AsyncClient, platform_admin_token: str) -> dict:
     resp = await client.post("/admin/v1/tenants", json={"name": "Tenant B"}, headers=_auth(platform_admin_token))
     assert resp.status_code == 200, resp.text
+    granted = await client.put(
+        f"/admin/v1/tenants/{resp.json()['tenantId']}/plugins/tls-scanner", headers=_auth(platform_admin_token)
+    )
+    assert granted.status_code == 200, granted.text
     return resp.json()
 
 

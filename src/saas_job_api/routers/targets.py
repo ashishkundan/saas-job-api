@@ -10,10 +10,11 @@ from fastapi import APIRouter, Depends, Request
 from ..audit import record_audit_event
 from ..audit_store_base import AuditLogStoreBase
 from ..auth import authenticated_admin_principal, require_any_role, require_tenant_access
-from ..errors import ConflictError, NotFoundError
+from ..errors import BadRequestError, ConflictError, NotFoundError
 from ..identity import AdminRole
 from ..jwt_tokens import TokenClaims
 from ..models.tenancy import TargetCreateRequest, TargetResponse
+from ..plugin_store_base import PluginStoreBase
 from ..target_store_base import TargetStoreBase
 from ..tenancy import Target, new_target_id
 from ..time_provider import Clock
@@ -25,6 +26,10 @@ _WRITE_ROLES = (AdminRole.PLATFORM_ADMIN, AdminRole.TENANT_ADMIN)
 
 def get_target_store(request: Request) -> TargetStoreBase:
     return request.app.state.target_store
+
+
+def get_plugin_store(request: Request) -> PluginStoreBase:
+    return request.app.state.plugin_store
 
 
 def get_audit_store(request: Request) -> AuditLogStoreBase:
@@ -57,8 +62,11 @@ async def create_target(
     audit_store: AuditLogStoreBase = Depends(get_audit_store),
     clock: Clock = Depends(get_clock),
     claims: TokenClaims = Depends(require_any_role(*_WRITE_ROLES)),
+    plugin_store: PluginStoreBase = Depends(get_plugin_store),
 ) -> TargetResponse:
     require_tenant_access(claims, tenant_id)
+    if not await plugin_store.is_entitled(tenant_id, body.plugin_ref):
+        raise BadRequestError(f"tenant {tenant_id} is not entitled to plugin {body.plugin_ref}")
     now = clock.now()
     target = Target(
         target_id=body.target_id or new_target_id(),
