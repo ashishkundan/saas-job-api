@@ -98,7 +98,13 @@ async def submit_result(
             tenant_id=job.payload.get("tenantId"),
             resource_type="job",
             resource_id=job_id,
-            detail={"recordCount": outcome.record_count, "pluginId": body.plugin_id},
+            detail={
+                "recordCount": outcome.record_count,
+                "pluginId": body.plugin_id,
+                "pluginVersion": body.plugin_version,
+                "pluginImageDigest": body.plugin_image_digest,
+                "pluginTrust": body.plugin_trust,
+            },
             now=now,
         )
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -34,6 +35,11 @@ class SubmitResultRequest(BaseModel):
     plugin_version: str = Field(alias="pluginVersion")
     container_duration_ms: int | None = Field(default=None, alias="containerDurationMs")
     certificates: list[CertificateRecordRequest] = Field(default_factory=list)
+    # Audit: the exact plugin image the gateway verified and ran, and how its
+    # signature was trusted ("tuf", "tuf-cached" within the grace period, or
+    # a hand-installed "signed-manifest"). Optional for older gateways.
+    plugin_image_digest: str | None = Field(default=None, alias="pluginImageDigest", pattern=r"^sha256:[0-9a-f]{64}$")
+    plugin_trust: Literal["tuf", "tuf-cached", "signed-manifest"] | None = Field(default=None, alias="pluginTrust")
 
 
 class SubmitResultResponse(BaseModel):

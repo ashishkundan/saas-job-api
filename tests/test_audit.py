@@ -189,6 +189,30 @@ async def test_result_submission_is_audited_once_not_on_retry(client, admin_head
     assert events[0].detail["recordCount"] == 1
 
 
+async def test_result_audit_records_the_verified_plugin_image(client, admin_headers, gateway_headers, app) -> None:
+    job_id = await _seed_claim_and_ack(client, admin_headers, gateway_headers)
+    digest = "sha256:" + "c" * 64
+    payload = {"attemptToken": "attempt-1", "pluginId": "tls-scanner", "pluginVersion": "2.1", "certificates": [CERT],
+               "pluginImageDigest": digest, "pluginTrust": "tuf"}
+
+    resp = await client.post(f"/gateway/v1/jobs/{job_id}/results", json=payload, headers=gateway_headers)
+    assert resp.status_code == 200
+
+    event = next(e for e in await _events(app) if e.resource_id == job_id and e.event_type == "RESULT_SUBMITTED")
+    assert event.detail["pluginImageDigest"] == digest
+    assert event.detail["pluginTrust"] == "tuf"
+    assert event.detail["pluginVersion"] == "2.1"
+
+
+async def test_a_malformed_plugin_image_digest_is_rejected(client, admin_headers, gateway_headers) -> None:
+    job_id = await _seed_claim_and_ack(client, admin_headers, gateway_headers)
+    payload = {"attemptToken": "attempt-1", "pluginId": "tls-scanner", "pluginVersion": "2.1", "certificates": [CERT],
+               "pluginImageDigest": "sha256:not-a-digest"}
+
+    resp = await client.post(f"/gateway/v1/jobs/{job_id}/results", json=payload, headers=gateway_headers)
+    assert resp.status_code in (400, 422)
+
+
 async def test_interrupted_report_is_audited_only_when_reissued(client, admin_headers, gateway_headers, app) -> None:
     job_id = await _seed_claim_and_ack(client, admin_headers, gateway_headers)
 
