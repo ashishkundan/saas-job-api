@@ -19,7 +19,7 @@ from ..plugin_store_base import PluginStoreBase
 from ..store import new_correlation_id, new_job_id
 from ..store_base import JobStoreBase
 from ..target_store_base import TargetStoreBase
-from ..tenancy import build_target_job_payload, default_job_type
+from ..tenancy import build_target_job_payload, default_job_type, resolve_plugin_version
 from ..tenant_store_base import TenantStoreBase
 
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin_token)])
@@ -58,8 +58,15 @@ async def create_job(
     if target is None:
         raise NotFoundError(f"target not found: {body.target_id}")
 
-    if not await plugin_store.is_entitled(target.tenant_id, target.plugin_ref):
+    pins = await plugin_store.pinned_versions(target.tenant_id)
+    if target.plugin_ref not in pins:
         raise BadRequestError(f"tenant {target.tenant_id} is not entitled to plugin {target.plugin_ref}")
+    plugin_version = resolve_plugin_version(target, pins[target.plugin_ref])
+    if plugin_version is None:
+        raise BadRequestError(
+            f"target '{target.target_id}' has no pluginVersion and tenant {target.tenant_id} "
+            f"has no pinned version of {target.plugin_ref}"
+        )
 
     expected_job_type = default_job_type(target)
     if body.job_type is not None and body.job_type != expected_job_type:
@@ -75,7 +82,7 @@ async def create_job(
         priority=body.priority,
         scheduled_at=body.scheduled_at or datetime.now(timezone.utc),
         correlation_id=body.correlation_id or new_correlation_id(),
-        payload=build_target_job_payload(target, timeoutSeconds=body.timeout_seconds),
+        payload=build_target_job_payload(target, plugin_version=plugin_version, timeoutSeconds=body.timeout_seconds),
         max_attempts=body.max_attempts,
         trace_id=body.trace_id,
         tenant_id=target.tenant_id,

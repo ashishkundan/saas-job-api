@@ -29,3 +29,8 @@ class TargetStoreBase(ABC):
     @abstractmethod
     async def delete(self, tenant_id: str, target_id: str) -> None:
         """Remove one target. Raise NotFoundError if it doesn't exist for that tenant."""
+
+    @abstractmethod
+    async def clear_version_overrides(self, tenant_id: str, plugin_ref: str) -> int:
+        """Make every target of the tenant using plugin_ref follow the tenant's
+        pinned version (plugin_version = None). Returns how many changed."""

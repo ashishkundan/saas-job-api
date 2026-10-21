@@ -16,7 +16,7 @@ from ..jwt_tokens import TokenClaims
 from ..models.tenancy import TargetCreateRequest, TargetResponse
 from ..plugin_store_base import PluginStoreBase
 from ..target_store_base import TargetStoreBase
-from ..tenancy import Target, new_target_id
+from ..tenancy import Target, new_target_id, resolve_plugin_version
 from ..time_provider import Clock
 
 router = APIRouter(prefix="/admin/v1/tenants/{tenant_id}/targets", tags=["targets"])
@@ -40,8 +40,9 @@ def get_clock(request: Request) -> Clock:
     return request.app.state.clock
 
 
-def _to_response(target: Target) -> TargetResponse:
+def _to_response(target: Target, pins: dict[str, str | None]) -> TargetResponse:
     return TargetResponse(
+        effectivePluginVersion=resolve_plugin_version(target, pins.get(target.plugin_ref)),
         targetId=target.target_id,
         tenantId=target.tenant_id,
         name=target.name,
@@ -65,8 +66,13 @@ async def create_target(
     plugin_store: PluginStoreBase = Depends(get_plugin_store),
 ) -> TargetResponse:
     require_tenant_access(claims, tenant_id)
-    if not await plugin_store.is_entitled(tenant_id, body.plugin_ref):
+    pins = await plugin_store.pinned_versions(tenant_id)
+    if body.plugin_ref not in pins:
         raise BadRequestError(f"tenant {tenant_id} is not entitled to plugin {body.plugin_ref}")
+    if body.plugin_version is None and pins[body.plugin_ref] is None:
+        raise BadRequestError(
+            f"no pluginVersion given and tenant {tenant_id} has no pinned version of {body.plugin_ref}"
+        )
     now = clock.now()
     target = Target(
         target_id=body.target_id or new_target_id(),
@@ -87,7 +93,7 @@ async def create_target(
         audit_store, event_type="TARGET_CREATED", actor=claims.subject,
         tenant_id=tenant_id, resource_type="target", resource_id=target.target_id, now=now,
     )
-    return _to_response(target)
+    return _to_response(target, pins)
 
 
 @router.get("", response_model=list[TargetResponse])
@@ -95,10 +101,12 @@ async def list_targets(
     tenant_id: str,
     store: TargetStoreBase = Depends(get_target_store),
     claims: TokenClaims = Depends(authenticated_admin_principal),
+    plugin_store: PluginStoreBase = Depends(get_plugin_store),
 ) -> list[TargetResponse]:
     require_tenant_access(claims, tenant_id)
     targets = await store.list_by_tenant(tenant_id)
-    return [_to_response(t) for t in targets]
+    pins = await plugin_store.pinned_versions(tenant_id)
+    return [_to_response(t, pins) for t in targets]
 
 
 @router.get("/{target_id}", response_model=TargetResponse)
@@ -107,12 +115,13 @@ async def get_target(
     target_id: str,
     store: TargetStoreBase = Depends(get_target_store),
     claims: TokenClaims = Depends(authenticated_admin_principal),
+    plugin_store: PluginStoreBase = Depends(get_plugin_store),
 ) -> TargetResponse:
     require_tenant_access(claims, tenant_id)
     target = await store.get(tenant_id, target_id)
     if target is None:
         raise NotFoundError(f"target not found: {target_id}")
-    return _to_response(target)
+    return _to_response(target, await plugin_store.pinned_versions(tenant_id))
 
 
 @router.delete("/{target_id}")

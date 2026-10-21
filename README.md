@@ -179,6 +179,25 @@ curl -s http://127.0.0.1:8000/admin/jobs -H "X-Admin-Token: dev-admin-token"
 (on receipt), with `deliveryAttempts: 1` — no redelivery was needed because
 the receipt arrived before `reservationUntil`.
 
+## Plugin versions per customer (tenant)
+
+Each customer runs a **pinned version** of each plugin it is entitled to. Targets follow the pin unless they set their own `pluginVersion` (an override).
+
+```
+PUT /admin/v1/tenants/{tenantId}/plugins/{pluginRef}          # platform admin
+    {}                                                         # grant only
+    {"version": "1.3"}                                         # pin; targets without a version run 1.3
+    {"version": "1.2", "resetTargetOverrides": true}           # move every target onto 1.2 (upgrade / rollback)
+    {"version": null}                                          # unpin (409 while targets still follow it)
+GET /admin/v1/tenants/{tenantId}/plugins  ->  {"plugins": [...], "pinnedVersions": {"tls-scanner": "1.3"}}
+```
+
+- Only versions whose signed release has been uploaded can be pinned.
+- Every change is audited (`PLUGIN_VERSION_PINNED`, with the previous and new version).
+- Target responses show `pluginVersion` (the override, or null) and `effectivePluginVersion` (what jobs run).
+- A target with neither an override nor a tenant pin cannot be created, and gets no jobs.
+- Gateways still verify every version against the signed repository, so a pin can never select a revoked or unsigned release.
+
 ## Contract implemented
 
 - `POST /gateway/v1/jobs/poll`

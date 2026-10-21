@@ -49,7 +49,9 @@ class Target:
     host: str
     port: int
     plugin_ref: str
-    plugin_version: str
+    # Explicit per-target version (an override), or None to follow the
+    # tenant's pinned version of plugin_ref (resolve_plugin_version).
+    plugin_version: str | None
     created_at: datetime
     credential_ref: str | None = None
 
@@ -59,15 +61,22 @@ def default_job_type(target: Target) -> str:
     return f"{target.plugin_ref}-scan"
 
 
-def build_target_job_payload(target: Target, **extra: Any) -> dict[str, Any]:
+def resolve_plugin_version(target: Target, tenant_pin: str | None) -> str | None:
+    """The version a job for this target runs: the target's own override,
+    else the tenant's pinned version of the plugin, else None (no job)."""
+    return target.plugin_version or tenant_pin
+
+
+def build_target_job_payload(target: Target, *, plugin_version: str, **extra: Any) -> dict[str, Any]:
     """The Gateway execution payload for one Target - the only source of
     pluginRef/pluginVersion/targetEndpoint/credentialRef for a job, so a
     job can never point a tenant's gateway at something outside that
-    tenant's managed Targets. extra adds non-execution fields
+    tenant's managed Targets. plugin_version is the resolved version
+    (resolve_plugin_version). extra adds non-execution fields
     (timeoutSeconds, scheduleId)."""
     payload: dict[str, Any] = {
         "pluginRef": target.plugin_ref,
-        "pluginVersion": target.plugin_version,
+        "pluginVersion": plugin_version,
         "targetEndpoint": f"{target.host}:{target.port}",
         "credentialRef": target.credential_ref,
         "tenantId": target.tenant_id,

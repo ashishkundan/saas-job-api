@@ -55,6 +55,15 @@ class PostgresTargetStore(TargetStoreBase):
         if result == "DELETE 0":
             raise NotFoundError(f"target not found: {target_id}")
 
+    async def clear_version_overrides(self, tenant_id: str, plugin_ref: str) -> int:
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE targets SET plugin_version = NULL "
+                "WHERE tenant_id = $1 AND plugin_ref = $2 AND plugin_version IS NOT NULL",
+                tenant_id, plugin_ref,
+            )
+        return int(result.split()[-1])
+
     @staticmethod
     def _row_to_target(row) -> Target:
         return Target(

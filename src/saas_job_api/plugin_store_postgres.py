@@ -51,6 +51,40 @@ class PostgresPluginStore(PluginStoreBase):
             )
         return [row["plugin_ref"] for row in rows]
 
+    async def pinned_versions(self, tenant_id: str) -> dict[str, str | None]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT plugin_ref, pinned_version FROM tenant_plugins WHERE tenant_id = $1 ORDER BY plugin_ref",
+                tenant_id,
+            )
+        return {row["plugin_ref"]: row["pinned_version"] for row in rows}
+
+    async def set_pinned_version(self, tenant_id: str, plugin_ref: str, version: str | None) -> str | None:
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    "SELECT pinned_version FROM tenant_plugins WHERE tenant_id = $1 AND plugin_ref = $2 FOR UPDATE",
+                    tenant_id, plugin_ref,
+                )
+                if row is None:
+                    raise KeyError(plugin_ref)
+                await conn.execute(
+                    "UPDATE tenant_plugins SET pinned_version = $3 WHERE tenant_id = $1 AND plugin_ref = $2",
+                    tenant_id, plugin_ref, version,
+                )
+        return row["pinned_version"]
+
+    async def is_published(self, plugin_ref: str, version: str) -> bool:
+        # Release documents are stored as targets/<plugin>/<sha256>.<version>.json.
+        # plugin_ref and version are validated (PLUGIN_REF / PLUGIN_VERSION)
+        # before this is called and cannot contain LIKE wildcards or "\".
+        pattern = f"{plugin_ref}/" + "_" * 64 + f".{version}.json"
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT 1 FROM plugin_repo_files WHERE kind = 'targets' AND path LIKE $1 LIMIT 1", pattern,
+            )
+        return row is not None
+
     async def is_entitled(self, tenant_id: str, plugin_ref: str) -> bool:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(

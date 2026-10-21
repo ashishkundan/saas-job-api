@@ -37,3 +37,11 @@ class MemoryTargetStore(TargetStoreBase):
             if target is None or target.tenant_id != tenant_id:
                 raise NotFoundError(f"target not found: {target_id}")
             del self._targets[target_id]
+
+    async def clear_version_overrides(self, tenant_id: str, plugin_ref: str) -> int:
+        async with self._lock:
+            changed = [t for t in self._targets.values()
+                       if t.tenant_id == tenant_id and t.plugin_ref == plugin_ref and t.plugin_version is not None]
+            for target in changed:
+                target.plugin_version = None
+            return len(changed)

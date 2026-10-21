@@ -18,6 +18,8 @@ _METADATA_NAME = re.compile(r"^(timestamp|[0-9]{1,10}\.[a-z0-9][a-z0-9-]{0,62})\
 _TARGET_PATH = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}/[0-9a-f]{64}\.[0-9A-Za-z][0-9A-Za-z.+-]{0,63}\.json$")
 MAX_REPO_FILE_BYTES = 1024 * 1024
 PLUGIN_REF = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+# Same rule as the gateway's signed release documents.
+PLUGIN_VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$")
 
 
 def valid_repo_path(kind: str, path: str) -> bool:
@@ -53,3 +55,23 @@ class PluginStoreBase(ABC):
 
     async def is_entitled(self, tenant_id: str, plugin_ref: str) -> bool:
         return plugin_ref in await self.list_plugins(tenant_id)
+
+    # ---------------------------------------------- per-tenant version pin
+
+    @abstractmethod
+    async def pinned_versions(self, tenant_id: str) -> dict[str, str | None]:
+        """Entitled plugins of a tenant -> the version pinned for that tenant
+        (None = no pin; targets must then name a version themselves)."""
+
+    @abstractmethod
+    async def set_pinned_version(self, tenant_id: str, plugin_ref: str, version: str | None) -> str | None:
+        """Pin (or with None, unpin) a tenant's version of an entitled plugin.
+        Returns the previous pin. Raises KeyError if not entitled."""
+
+    async def pinned_version(self, tenant_id: str, plugin_ref: str) -> str | None:
+        return (await self.pinned_versions(tenant_id)).get(plugin_ref)
+
+    @abstractmethod
+    async def is_published(self, plugin_ref: str, version: str) -> bool:
+        """True if a signed release document for plugin_ref/version was ever
+        uploaded. (Revocation is in the signed metadata; gateways enforce it.)"""

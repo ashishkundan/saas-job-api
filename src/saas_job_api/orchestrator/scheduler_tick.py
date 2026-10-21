@@ -22,7 +22,7 @@ from ..schedule_store_base import ScheduleStoreBase
 from ..store import new_correlation_id, new_job_id
 from ..store_base import JobStoreBase
 from ..target_store_base import TargetStoreBase
-from ..tenancy import build_target_job_payload
+from ..tenancy import build_target_job_payload, resolve_plugin_version
 from ..time_provider import Clock
 
 logger = logging.getLogger(__name__)
@@ -71,12 +71,23 @@ async def run_scheduler_tick(
                 schedule.target_id,
             )
             continue
-        if plugin_store is not None and not await plugin_store.is_entitled(target.tenant_id, target.plugin_ref):
-            # The tenant's entitlement was revoked after the target was
-            # created: stop producing jobs for that plugin.
+        tenant_pin = None
+        if plugin_store is not None:
+            pins = await plugin_store.pinned_versions(target.tenant_id)
+            if target.plugin_ref not in pins:
+                # The tenant's entitlement was revoked after the target was
+                # created: stop producing jobs for that plugin.
+                logger.warning(
+                    "scheduler_tick: tenant '%s' is not entitled to plugin '%s' - schedule '%s' skipped",
+                    target.tenant_id, target.plugin_ref, schedule.schedule_id,
+                )
+                continue
+            tenant_pin = pins[target.plugin_ref]
+        plugin_version = resolve_plugin_version(target, tenant_pin)
+        if plugin_version is None:
             logger.warning(
-                "scheduler_tick: tenant '%s' is not entitled to plugin '%s' - schedule '%s' skipped",
-                target.tenant_id, target.plugin_ref, schedule.schedule_id,
+                "scheduler_tick: target '%s' has no plugin version (no override, no tenant pin) - schedule '%s' skipped",
+                target.target_id, schedule.schedule_id,
             )
             continue
 
@@ -90,7 +101,8 @@ async def run_scheduler_tick(
             # The schedule interval doubles as the gateway's grace period
             # for running a cached plugin while signed metadata is stale.
             payload=build_target_job_payload(
-                target, scheduleId=schedule.schedule_id, scheduleIntervalSeconds=schedule.interval_seconds
+                target, plugin_version=plugin_version,
+                scheduleId=schedule.schedule_id, scheduleIntervalSeconds=schedule.interval_seconds,
             ),
             max_attempts=DEFAULT_JOB_MAX_ATTEMPTS,
             trace_id=None,

@@ -31,7 +31,8 @@ class TargetCreateRequest(BaseModel):
     host: str
     port: int
     plugin_ref: str = Field(alias="pluginRef")
-    plugin_version: str = Field(alias="pluginVersion")
+    # Omit to follow the tenant's pinned version of the plugin.
+    plugin_version: str | None = Field(default=None, alias="pluginVersion", pattern=r"^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$")
     credential_ref: str | None = Field(default=None, alias="credentialRef")
 
 
@@ -44,9 +45,24 @@ class TargetResponse(BaseModel):
     host: str
     port: int
     plugin_ref: str = Field(alias="pluginRef")
-    plugin_version: str = Field(alias="pluginVersion")
+    # The target's own override (None = follows the tenant pin) and the
+    # version its jobs actually run (None = no version: jobs are refused).
+    plugin_version: str | None = Field(alias="pluginVersion")
+    effective_plugin_version: str | None = Field(alias="effectivePluginVersion")
     credential_ref: str | None = Field(default=None, alias="credentialRef")
     created_at: datetime = Field(alias="createdAt")
+
+
+class PluginEntitlementRequest(BaseModel):
+    """Optional body of PUT /admin/v1/tenants/{tenantId}/plugins/{pluginRef}.
+    "version" pins the tenant's default version of the plugin (null removes
+    the pin); "resetTargetOverrides" moves every target of that plugin onto
+    the pin, e.g. to upgrade or roll back a customer in one step."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    version: str | None = Field(default=None, pattern=r"^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$")
+    reset_target_overrides: bool = Field(default=False, alias="resetTargetOverrides")
 
 
 class ScheduleCreateRequest(BaseModel):
