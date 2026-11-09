@@ -58,6 +58,8 @@ Run these from the repository root with the Azure CLI signed in (`az login`).
    curl -fsS https://<apiUrl output>/healthz
    ```
 
+On a first deployment the API starts before the tables exist, so it logs `UndefinedTableError` from the scheduler until the migration job finishes (about a minute); that is expected.
+
 For later releases, repeat steps 2–4: new image digest, deploy, migrate. Run migrations before the new API revision takes traffic.
 
 ## Cost (dev, approximate, USD/month)
