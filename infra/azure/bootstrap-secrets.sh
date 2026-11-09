@@ -25,7 +25,9 @@ vault_id=$(az keyvault show -n "$VAULT" --query id -o tsv | tr -d '\r')
 az role assignment create --assignee-object-id "$me" --assignee-principal-type User \
   --role b86a8fe4-44ce-4948-aee5-eccb2c155cd7 --scope "$vault_id" -o none
 # Lets `az.getSecret` in the parameters file read the PostgreSQL password.
-az keyvault update -n "$VAULT" --enabled-for-template-deployment true -o none
+# Azure requires the trusted-services bypass for that; with the dev vault's
+# defaultAction=Allow it does not widen access.
+az keyvault update -n "$VAULT" --enabled-for-template-deployment true --bypass AzureServices -o none
 
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
