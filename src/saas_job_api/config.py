@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     
     # PostgreSQL connection URL (None = use in-memory store for dev)
     database_url: str | None = None
+    # Connections per replica. Keep replicas x max below the server's limit
+    # (Azure Flexible Server Burstable B1ms: ~35 usable connections).
+    db_pool_min_size: int = Field(default=10, ge=1, le=100)
+    db_pool_max_size: int = Field(default=20, ge=1, le=100)
 
     # Logging level
     log_level: str = "INFO"

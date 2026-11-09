@@ -23,7 +23,11 @@ async def create_store(settings: Settings, clock: Clock | None = None) -> JobSto
         JobStoreBase implementation (MemoryJobStore if no DATABASE_URL, else PostgresJobStore)
     """
     if settings.database_url:
-        pool = await create_db_pool(settings.database_url)
+        pool = await create_db_pool(
+            settings.database_url,
+            min_size=min(settings.db_pool_min_size, settings.db_pool_max_size),
+            max_size=settings.db_pool_max_size,
+        )
         return PostgresJobStore(
             pool,
             clock=clock,
