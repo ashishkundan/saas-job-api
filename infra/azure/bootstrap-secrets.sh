@@ -32,18 +32,22 @@ az keyvault update -n "$VAULT" --enabled-for-template-deployment true --bypass A
 tmp=$(mktemp)
 trap 'rm -f "$tmp"' EXIT
 chmod 600 "$tmp"
+# Windows az (Git Bash) cannot open /tmp/...; give it the native path.
+tmp_arg=$tmp
+command -v cygpath >/dev/null && tmp_arg=$(cygpath -w "$tmp")
 
 put() {  # put <name> <python expression producing the value>
   if az keyvault secret show --vault-name "$VAULT" -n "$1" -o none 2>/dev/null; then
     echo "  = $1 (exists, kept)"; return
   fi
   "$PY" -c "import secrets, string, sys; sys.stdout.write($2)" >"$tmp"
+  local err
   for _ in 1 2 3 4 5 6; do   # a new role assignment can take a minute to apply
-    az keyvault secret set --vault-name "$VAULT" -n "$1" --file "$tmp" --encoding utf-8 -o none 2>/dev/null \
+    err=$(az keyvault secret set --vault-name "$VAULT" -n "$1" --file "$tmp_arg" --encoding utf-8 -o none 2>&1) \
       && { echo "  + $1"; return; }
     sleep 20
   done
-  echo "  ! could not write $1" >&2; exit 1
+  echo "  ! could not write $1: $err" >&2; exit 1
 }
 
 echo "secrets in $VAULT:"
