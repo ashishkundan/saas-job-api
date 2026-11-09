@@ -31,6 +31,7 @@ The app's settings come from Key Vault references, which the container app resol
 | `database-url` | `SAAS_JOB_API_DATABASE_URL` | the deployment (`...?sslmode=require`) |
 | `admin-token` | `SAAS_JOB_API_ADMIN_TOKEN` | `bootstrap-secrets.sh` |
 | `jwt-secret` | `SAAS_JOB_API_JWT_SECRET` | `bootstrap-secrets.sh` |
+| `admin-password` | `SAAS_JOB_API_BOOTSTRAP_ADMIN_PASSWORD` (user `platform-admin`) | `bootstrap-secrets.sh` |
 | `gateway-tokens-json` | `SAAS_JOB_API_GATEWAY_TOKENS_JSON` | `bootstrap-secrets.sh` (`{}`), then you |
 | `gateway-tenants-json` | `SAAS_JOB_API_GATEWAY_TENANTS_JSON` | `bootstrap-secrets.sh` (`{}`), then you |
 

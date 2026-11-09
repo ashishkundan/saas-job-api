@@ -20,12 +20,15 @@ var vaultSecrets = [
   { name: 'database-url', env: 'SAAS_JOB_API_DATABASE_URL' }
   { name: 'admin-token', env: 'SAAS_JOB_API_ADMIN_TOKEN' }
   { name: 'jwt-secret', env: 'SAAS_JOB_API_JWT_SECRET' }
+  // First platform_admin login, seeded at startup if the user doesn't exist.
+  { name: 'admin-password', env: 'SAAS_JOB_API_BOOTSTRAP_ADMIN_PASSWORD' }
   { name: 'gateway-tokens-json', env: 'SAAS_JOB_API_GATEWAY_TOKENS_JSON' }
   { name: 'gateway-tenants-json', env: 'SAAS_JOB_API_GATEWAY_TENANTS_JSON' }
 ]
 
 var settings = [
   { name: 'SAAS_JOB_API_LOG_LEVEL', value: 'INFO' }
+  { name: 'SAAS_JOB_API_BOOTSTRAP_ADMIN_USERNAME', value: 'platform-admin' }
   { name: 'SAAS_JOB_API_RESERVATION_TTL_SECONDS', value: '60.0' }
   { name: 'SAAS_JOB_API_DEFAULT_MAX_JOBS', value: '20' }
   { name: 'SAAS_JOB_API_DEFAULT_POLL_AFTER_MS', value: '2000' }

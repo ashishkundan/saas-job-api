@@ -8,7 +8,7 @@
 #
 #   bash infra/azure/bootstrap-secrets.sh [vault-name]
 #
-# Secrets: postgres-admin-password, admin-token, jwt-secret,
+# Secrets: postgres-admin-password, admin-token, jwt-secret, admin-password,
 # gateway-tokens-json ({} - add gateways later), gateway-tenants-json ({}).
 # database-url is written by the Bicep deployment (it needs the server name).
 set -euo pipefail
@@ -55,5 +55,6 @@ echo "secrets in $VAULT:"
 put postgres-admin-password "''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(32))"
 put admin-token "secrets.token_urlsafe(32)"
 put jwt-secret "secrets.token_urlsafe(48)"
+put admin-password "secrets.token_urlsafe(24)"   # login of 'platform-admin'
 put gateway-tokens-json "'{}'"
 put gateway-tenants-json "'{}'"
