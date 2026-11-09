@@ -13,7 +13,7 @@ param keyVaultUri string
 param minReplicas int
 param maxReplicas int
 
-var acrPull = '7f951dda-4ed3-4680-a7ca-43d093b85d64'
+var acrPull = '7f951dda-4ed3-4680-a7ca-43fe172d538d' // AcrPull (built-in)
 
 // Key Vault secret name -> container app secret name / environment variable.
 var vaultSecrets = [
