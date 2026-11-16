@@ -145,7 +145,7 @@ async def test_schedule_create_and_delete_are_audited(client, tenant_a, tenant_a
     )
     target_id = target_resp.json()["targetId"]
 
-    schedule_payload = {"targetId": target_id, "jobType": "tls-scan", "manifestVersion": "1.0", "intervalSeconds": 3600}
+    schedule_payload = {"targetId": target_id, "jobType": "tls-scanner-scan", "manifestVersion": "1.0", "intervalSeconds": 3600}
     create_resp = await client.post(
         f"/admin/v1/tenants/{tenant_a['tenantId']}/schedules", json=schedule_payload, headers=_auth(tenant_a_admin_token)
     )

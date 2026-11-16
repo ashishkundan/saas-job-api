@@ -118,8 +118,10 @@ class ScheduleCreateRequest(BaseModel):
 
     schedule_id: str | None = Field(default=None, alias="scheduleId")
     target_id: str = Field(alias="targetId")
-    job_type: str = Field(alias="jobType")
-    manifest_version: str = Field(alias="manifestVersion")
+    # Omit to use the target's job type ("<pluginRef>-scan"); a different
+    # value is rejected.
+    job_type: str | None = Field(default=None, alias="jobType")
+    manifest_version: str = Field(default="1.0", alias="manifestVersion")
     interval_seconds: int = Field(alias="intervalSeconds")
     # Defaults to "due immediately" (now) if omitted - main.py's clock
     # provides "now" at request-handling time, not import time.

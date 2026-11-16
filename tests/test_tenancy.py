@@ -294,7 +294,7 @@ async def _create_target(client: httpx.AsyncClient, tenant_id: str, token: str) 
 
 
 def _schedule_payload(target_id: str, **overrides) -> dict:
-    payload = {"targetId": target_id, "jobType": "tls-scan", "manifestVersion": "1.0", "intervalSeconds": 3600}
+    payload = {"targetId": target_id, "jobType": "tls-scanner-scan", "manifestVersion": "1.0", "intervalSeconds": 3600}
     payload.update(overrides)
     return payload
 

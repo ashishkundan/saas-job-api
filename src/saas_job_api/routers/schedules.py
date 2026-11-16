@@ -16,10 +16,14 @@ from ..jwt_tokens import TokenClaims
 from ..models.tenancy import ScheduleCreateRequest, ScheduleResponse
 from ..schedule_store_base import ScheduleStoreBase
 from ..target_store_base import TargetStoreBase
-from ..tenancy import Schedule, new_schedule_id
+from ..tenancy import Schedule, default_job_type, new_schedule_id
 from ..time_provider import Clock
 
 router = APIRouter(prefix="/admin/v1/tenants/{tenant_id}/schedules", tags=["schedules"])
+
+# Shortest allowed interval: keeps a typo (e.g. 5 instead of 300) from
+# flooding the job queue.
+MIN_INTERVAL_SECONDS = 300
 
 _WRITE_ROLES = (AdminRole.PLATFORM_ADMIN, AdminRole.TENANT_ADMIN)
 
@@ -67,19 +71,27 @@ async def create_schedule(
 ) -> ScheduleResponse:
     require_tenant_access(claims, tenant_id)
 
-    if body.interval_seconds <= 0:
-        raise BadRequestError("intervalSeconds must be a positive integer")
+    if body.interval_seconds < MIN_INTERVAL_SECONDS:
+        raise BadRequestError(f"intervalSeconds must be at least {MIN_INTERVAL_SECONDS}")
 
     target = await target_store.get(tenant_id, body.target_id)
     if target is None:
         raise NotFoundError(f"target not found for this tenant: {body.target_id}")
+    # Same rule as POST /admin/jobs: the target's plugin decides the job type,
+    # so a schedule cannot create jobs that no gateway will ever claim.
+    job_type = default_job_type(target)
+    if body.job_type is not None and body.job_type != job_type:
+        raise BadRequestError(
+            f"jobType '{body.job_type}' does not match target '{target.target_id}' "
+            f"(plugin '{target.plugin_ref}' runs as '{job_type}')"
+        )
 
     now = clock.now()
     schedule = Schedule(
         schedule_id=body.schedule_id or new_schedule_id(),
         tenant_id=tenant_id,
         target_id=body.target_id,
-        job_type=body.job_type,
+        job_type=job_type,
         manifest_version=body.manifest_version,
         interval_seconds=body.interval_seconds,
         next_run_at=body.next_run_at or now,
