@@ -51,6 +51,18 @@ class PostgresScheduleStore(ScheduleStoreBase):
             rows = await conn.fetch("SELECT * FROM schedules WHERE tenant_id = $1 ORDER BY created_at", tenant_id)
         return [self._row_to_schedule(row) for row in rows]
 
+    async def update(self, schedule: Schedule) -> Schedule:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "UPDATE schedules SET interval_seconds = $1, enabled = $2, next_run_at = $3 "
+                "WHERE schedule_id = $4 AND tenant_id = $5 RETURNING *",
+                schedule.interval_seconds, schedule.enabled, schedule.next_run_at,
+                schedule.schedule_id, schedule.tenant_id,
+            )
+        if row is None:
+            raise NotFoundError(f"schedule not found: {schedule.schedule_id}")
+        return self._row_to_schedule(row)
+
     async def delete(self, tenant_id: str, schedule_id: str) -> None:
         async with self.pool.acquire() as conn:
             result = await conn.execute(

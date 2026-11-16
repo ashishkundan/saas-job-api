@@ -75,6 +75,10 @@ class Settings(BaseSettings):
     # replaced (a wiped VM re-registers under a brand-new gateway_id, 1.1b)
     # and would otherwise never report a result for it.
     orphaned_job_sla_seconds: float = 600.0
+    # Overlap guard: a schedule does not fire while its previous job is
+    # queued, or running (ACKNOWLEDGED) for less than this long. A running
+    # job older than this is treated as stuck and no longer blocks.
+    schedule_running_job_timeout_seconds: float = 21_600.0
 
     # Phase 2.7: audit log retention. audit_events is append-only (no
     # update, ever) - retention_days is a floor, not a ceiling: a

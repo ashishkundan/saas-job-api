@@ -35,6 +35,17 @@ class JobStoreBase(ABC):
         pass
 
     @abstractmethod
+    async def open_schedule_job(
+        self, *, tenant_id: str, target_id: str, schedule_id: str, acknowledged_after: datetime
+    ) -> str | None:
+        """Return the id of an unfinished job a schedule created for this
+        target, or None. AVAILABLE/RESERVED jobs always count (still waiting
+        for a gateway); ACKNOWLEDGED jobs count only while acknowledged after
+        `acknowledged_after` - older ones are treated as stuck, because a
+        scan that fails never reports a result."""
+        pass
+
+    @abstractmethod
     async def set_fault(self, status_code: int, retry_after_seconds: float | None) -> None:
         """Inject a transient fault for the next poll (dev-only testing)."""
         pass

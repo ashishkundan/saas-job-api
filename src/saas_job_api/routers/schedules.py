@@ -13,7 +13,7 @@ from ..auth import authenticated_admin_principal, require_any_role, require_tena
 from ..errors import BadRequestError, ConflictError, NotFoundError
 from ..identity import AdminRole
 from ..jwt_tokens import TokenClaims
-from ..models.tenancy import ScheduleCreateRequest, ScheduleResponse
+from ..models.tenancy import ScheduleCreateRequest, ScheduleResponse, ScheduleUpdateRequest
 from ..schedule_store_base import ScheduleStoreBase
 from ..target_store_base import TargetStoreBase
 from ..tenancy import Schedule, default_job_type, new_schedule_id
@@ -130,6 +130,41 @@ async def get_schedule(
     schedule = await store.get(tenant_id, schedule_id)
     if schedule is None:
         raise NotFoundError(f"schedule not found: {schedule_id}")
+    return _to_response(schedule)
+
+
+@router.patch("/{schedule_id}", response_model=ScheduleResponse)
+async def update_schedule(
+    tenant_id: str,
+    schedule_id: str,
+    body: ScheduleUpdateRequest,
+    store: ScheduleStoreBase = Depends(get_schedule_store),
+    audit_store: AuditLogStoreBase = Depends(get_audit_store),
+    clock: Clock = Depends(get_clock),
+    claims: TokenClaims = Depends(require_any_role(*_WRITE_ROLES)),
+) -> ScheduleResponse:
+    """Change a schedule's interval, pause/resume it, or move its next run.
+    Changing only the interval keeps the next run already planned."""
+    require_tenant_access(claims, tenant_id)
+    if body.interval_seconds is not None and body.interval_seconds < MIN_INTERVAL_SECONDS:
+        raise BadRequestError(f"intervalSeconds must be at least {MIN_INTERVAL_SECONDS}")
+    if body.next_run_at is not None and body.next_run_at.tzinfo is None:
+        raise BadRequestError("nextRunAt must include a timezone, e.g. 2026-11-18T02:00:00Z")
+
+    schedule = await store.get(tenant_id, schedule_id)
+    if schedule is None:
+        raise NotFoundError(f"schedule not found: {schedule_id}")
+    changed = body.model_dump(exclude_none=True)
+    if not changed:
+        raise BadRequestError("nothing to change: give intervalSeconds, enabled or nextRunAt")
+    for field, value in changed.items():
+        setattr(schedule, field, value)
+    schedule = await store.update(schedule)
+    await record_audit_event(
+        audit_store, event_type="SCHEDULE_UPDATED", actor=claims.subject,
+        tenant_id=tenant_id, resource_type="schedule", resource_id=schedule_id, now=clock.now(),
+        detail=body.model_dump(mode="json", by_alias=True, exclude_none=True),
+    )
     return _to_response(schedule)
 
 

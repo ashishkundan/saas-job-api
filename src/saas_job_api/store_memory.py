@@ -52,6 +52,20 @@ class MemoryJobStore(JobStoreBase):
         async with self._lock:
             return self._jobs.get(job_id)
 
+    async def open_schedule_job(
+        self, *, tenant_id: str, target_id: str, schedule_id: str, acknowledged_after: datetime
+    ) -> str | None:
+        async with self._lock:
+            for job in sorted(self._jobs.values(), key=lambda j: j.scheduled_at, reverse=True):
+                if (job.tenant_id, job.target_id) != (tenant_id, target_id) or job.state == JobState.COMPLETED:
+                    continue
+                if job.payload.get("scheduleId") != schedule_id:
+                    continue
+                if job.state == JobState.ACKNOWLEDGED and (job.ack_received_at or job.scheduled_at) <= acknowledged_after:
+                    continue
+                return job.job_id
+            return None
+
     async def set_fault(self, status_code: int, retry_after_seconds: float | None) -> None:
         async with self._lock:
             self._pending_fault = PendingFault(status_code, retry_after_seconds)

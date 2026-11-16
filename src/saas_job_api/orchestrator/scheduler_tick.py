@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import timedelta
 
 from ..domain import JobRecord
 from ..health import HealthState, derive_current_status
@@ -32,6 +33,9 @@ DEFAULT_CLAIM_LIMIT = 100
 DEFAULT_JOB_PRIORITY = 50
 DEFAULT_JOB_MAX_ATTEMPTS = 8
 DEFAULT_ORPHANED_JOB_SLA_SECONDS = 600.0
+# How long an ACKNOWLEDGED (running) job keeps its schedule from firing
+# again. Past this it is treated as stuck: a scan that fails never reports.
+DEFAULT_RUNNING_JOB_TIMEOUT_SECONDS = 21_600.0
 _HELD_STATUSES = (HealthState.UNREACHABLE, HealthState.FAILED)
 
 
@@ -43,6 +47,7 @@ async def run_scheduler_tick(
     clock: Clock,
     limit: int = DEFAULT_CLAIM_LIMIT,
     plugin_store: PluginStoreBase | None = None,
+    running_job_timeout_seconds: float = DEFAULT_RUNNING_JOB_TIMEOUT_SECONDS,
 ) -> int:
     """Claim every currently-due schedule and create one JobRecord per
     claim, shaped to match the Gateway VM's own job-payload contract
@@ -69,6 +74,19 @@ async def run_scheduler_tick(
                 "scheduler_tick: schedule '%s' references missing target '%s' - skipped",
                 schedule.schedule_id,
                 schedule.target_id,
+            )
+            continue
+        # Overlap guard: never queue a second job while this schedule's
+        # previous one is still waiting or running. The claim above already
+        # advanced next_run_at, so a skipped run simply waits for its next slot.
+        open_job = await job_store.open_schedule_job(
+            tenant_id=target.tenant_id, target_id=target.target_id, schedule_id=schedule.schedule_id,
+            acknowledged_after=now - timedelta(seconds=running_job_timeout_seconds),
+        )
+        if open_job is not None:
+            logger.info(
+                "scheduler_tick: schedule '%s' skipped - previous job '%s' has not finished",
+                schedule.schedule_id, open_job,
             )
             continue
         tenant_pin = None
@@ -177,6 +195,7 @@ async def start_scheduler_loop(
     plugin_store: PluginStoreBase | None = None,
     interval_seconds: float = DEFAULT_TICK_INTERVAL_SECONDS,
     orphaned_job_sla_seconds: float = DEFAULT_ORPHANED_JOB_SLA_SECONDS,
+    running_job_timeout_seconds: float = DEFAULT_RUNNING_JOB_TIMEOUT_SECONDS,
     gateway_degraded_after_seconds: float = 90.0,
     gateway_unreachable_after_seconds: float = 300.0,
     gateway_failed_after_seconds: float = 1_800.0,
@@ -191,7 +210,7 @@ async def start_scheduler_loop(
         try:
             await run_scheduler_tick(
                 schedule_store=schedule_store, target_store=target_store, job_store=job_store, clock=clock,
-                plugin_store=plugin_store,
+                plugin_store=plugin_store, running_job_timeout_seconds=running_job_timeout_seconds,
             )
         except Exception:
             logger.exception("scheduler_tick: schedule tick failed")

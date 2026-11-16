@@ -154,6 +154,7 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
                     shutdown_event=app.state.scheduler_shutdown_event,
                     interval_seconds=cfg.scheduler_tick_interval_seconds,
                     orphaned_job_sla_seconds=cfg.orphaned_job_sla_seconds,
+                    running_job_timeout_seconds=cfg.schedule_running_job_timeout_seconds,
                     gateway_degraded_after_seconds=cfg.gateway_degraded_after_seconds,
                     gateway_unreachable_after_seconds=cfg.gateway_unreachable_after_seconds,
                     gateway_failed_after_seconds=cfg.gateway_failed_after_seconds,

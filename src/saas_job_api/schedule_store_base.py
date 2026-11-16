@@ -22,6 +22,11 @@ class ScheduleStoreBase(ABC):
         """Return every schedule belonging to one tenant."""
 
     @abstractmethod
+    async def update(self, schedule: Schedule) -> Schedule:
+        """Save interval_seconds, enabled and next_run_at of an existing
+        schedule. Raise NotFoundError if it doesn't exist for that tenant."""
+
+    @abstractmethod
     async def delete(self, tenant_id: str, schedule_id: str) -> None:
         """Remove one schedule. Raise NotFoundError if it doesn't exist for that tenant."""
 

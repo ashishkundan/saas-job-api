@@ -32,6 +32,16 @@ class MemoryScheduleStore(ScheduleStoreBase):
         async with self._lock:
             return [s for s in self._schedules.values() if s.tenant_id == tenant_id]
 
+    async def update(self, schedule: Schedule) -> Schedule:
+        async with self._lock:
+            current = self._schedules.get(schedule.schedule_id)
+            if current is None or current.tenant_id != schedule.tenant_id:
+                raise NotFoundError(f"schedule not found: {schedule.schedule_id}")
+            current.interval_seconds = schedule.interval_seconds
+            current.enabled = schedule.enabled
+            current.next_run_at = schedule.next_run_at
+            return current
+
     async def delete(self, tenant_id: str, schedule_id: str) -> None:
         async with self._lock:
             schedule = self._schedules.get(schedule_id)

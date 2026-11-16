@@ -128,6 +128,17 @@ class ScheduleCreateRequest(BaseModel):
     next_run_at: datetime | None = Field(default=None, alias="nextRunAt")
 
 
+class ScheduleUpdateRequest(BaseModel):
+    """PATCH body: only the fields given change. "enabled": false pauses the
+    schedule, true resumes it (a nextRunAt in the past fires on the next tick)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    interval_seconds: int | None = Field(default=None, alias="intervalSeconds")
+    enabled: bool | None = None
+    next_run_at: datetime | None = Field(default=None, alias="nextRunAt")
+
+
 class ScheduleResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 

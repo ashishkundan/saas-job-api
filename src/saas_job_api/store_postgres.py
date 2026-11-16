@@ -69,6 +69,20 @@ class PostgresJobStore(JobStoreBase):
             row = await conn.fetchrow("SELECT * FROM jobs WHERE job_id = $1", job_id)
         return self._row_to_record(row) if row is not None else None
 
+    async def open_schedule_job(
+        self, *, tenant_id: str, target_id: str, schedule_id: str, acknowledged_after: datetime
+    ) -> str | None:
+        # Served by ix_jobs_open_by_target (migration 013): only unfinished
+        # rows of one target are scanned, however large the jobs table grows.
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval(
+                "SELECT job_id FROM jobs WHERE tenant_id = $1 AND target_id = $2 "
+                "AND state <> 'COMPLETED' AND payload->>'scheduleId' = $3 "
+                "AND (state <> 'ACKNOWLEDGED' OR COALESCE(ack_received_at, scheduled_at) > $4) "
+                "ORDER BY scheduled_at DESC LIMIT 1",
+                tenant_id, target_id, schedule_id, acknowledged_after,
+            )
+
     async def set_fault(self, status_code: int, retry_after_seconds: float | None) -> None:
         """Store a transient fault (in-memory, for testing)."""
         self._pending_fault = (status_code, retry_after_seconds)

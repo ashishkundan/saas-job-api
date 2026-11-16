@@ -354,3 +354,64 @@ async def test_reissued_job_becomes_claimable_by_a_different_gateway() -> None:
     assert len(claimed) == 1
     assert claimed[0].job_id == "job-1"
     assert claimed[0].tenant_id == "tenant-1"
+
+
+# --- overlap guard -----------------------------------------------------
+
+async def _tick(schedule_store, target_store, job_store, at, **kw) -> int:
+    return await run_scheduler_tick(schedule_store=schedule_store, target_store=target_store,
+                                    job_store=job_store, clock=FakeClock(at), **kw)
+
+
+async def test_schedule_does_not_queue_a_second_job_while_the_first_is_waiting() -> None:
+    schedule_store, target_store, job_store = await _stores()
+    await schedule_store.create(_schedule())
+
+    assert await _tick(schedule_store, target_store, job_store, NOW) == 1
+    # One interval later the first job is still AVAILABLE (gateway offline).
+    assert await _tick(schedule_store, target_store, job_store, NOW + timedelta(hours=1)) == 0
+    assert await _tick(schedule_store, target_store, job_store, NOW + timedelta(hours=2)) == 0
+
+    assert len(await job_store.list_all()) == 1
+    # The skipped runs still moved the schedule on, so nothing is owed later.
+    assert (await schedule_store.get("tenant-1", "sched-1")).next_run_at == NOW + timedelta(hours=3)
+
+
+async def test_schedule_fires_again_once_the_previous_job_completed() -> None:
+    schedule_store, target_store, job_store = await _stores()
+    await schedule_store.create(_schedule())
+    await _tick(schedule_store, target_store, job_store, NOW)
+    (job,) = await job_store.list_all()
+    job.state = JobState.COMPLETED
+
+    assert await _tick(schedule_store, target_store, job_store, NOW + timedelta(hours=1)) == 1
+
+
+async def test_running_job_blocks_until_the_running_timeout_then_counts_as_stuck() -> None:
+    schedule_store, target_store, job_store = await _stores()
+    await schedule_store.create(_schedule())
+    await _tick(schedule_store, target_store, job_store, NOW)
+    (job,) = await job_store.list_all()
+    job.state = JobState.ACKNOWLEDGED
+    job.ack_received_at = NOW + timedelta(minutes=1)
+
+    # Still running within the timeout: skipped.
+    assert await _tick(schedule_store, target_store, job_store, NOW + timedelta(hours=1),
+                       running_job_timeout_seconds=7200) == 0
+    # Two hours after acknowledgement with no result: treated as stuck.
+    assert await _tick(schedule_store, target_store, job_store, NOW + timedelta(hours=2, minutes=2),
+                       running_job_timeout_seconds=7200) == 1
+
+
+async def test_open_jobs_of_other_schedules_or_manual_jobs_do_not_block() -> None:
+    schedule_store, target_store, job_store = await _stores()
+    await schedule_store.create(_schedule())
+    await schedule_store.create(_schedule(schedule_id="sched-2"))
+    await job_store.seed(JobRecord(
+        job_id="manual", job_type="tls-scanner-scan", manifest_version="1.0", priority=50, scheduled_at=NOW,
+        correlation_id="c", payload={"targetId": "target-1"}, max_attempts=8, trace_id=None,
+        tenant_id="tenant-1", target_id="target-1",
+    ))
+
+    # Both schedules fire despite the open manual job, and neither blocks the other.
+    assert await _tick(schedule_store, target_store, job_store, NOW) == 2
