@@ -63,18 +63,47 @@ On a first deployment the API starts before the tables exist, so it logs `Undefi
 
 For later releases, repeat steps 2–4: new image digest, deploy, migrate. Run migrations before the new API revision takes traffic.
 
-## Cost (dev, approximate, USD/month)
+## Cost (dev, measured, AUD/month)
 
-| Item | ~Cost |
-|---|---|
-| PostgreSQL Burstable B1ms + 32 GB storage | 20 |
-| Container Apps: 1 replica (0.5 vCPU, 1 GiB) always on, after the free grant | 25 |
-| Key Vault private endpoint | 8 |
-| Log Analytics (capped at 1 GB/day) | 2–5 |
-| Private DNS zones | 1 |
-| **Total** | **≈ 55–60** |
+Measured from Cost Management in November 2026 (full days, billing currency AUD):
 
-The subscription's budget alert (`cv360-dev-monthly`, $30) has to be raised before deploying.
+| Item | AUD/day | ~AUD/month | Pausable |
+|---|---|---|---|
+| Signing keys: 7 Premium HSM EC keys in the three TUF vaults, billed per key per month, used or not | – | 49.70 | no |
+| PostgreSQL B1ms compute (+ storage ~0.10/day) | 1.10 | 33 | compute only |
+| Container Apps environment load balancer + public IP (VNet integration) | 0.85 | 26 | no |
+| API, 1 replica always on | 0.74 | 22 | yes |
+| Key Vault private endpoint | 0.51 | 15.50 | no |
+| Container Registry Basic | 0.24 | 7.30 | no |
+| Private DNS zones, Log Analytics | 0.05 | 1.50 | no |
+| **Total** | | **≈ 155** | |
+
+Paused (`power.sh pause`) the hosting drops by about AUD 1.75/day, to about
+AUD 53/month plus the signing keys. The keys are the largest single item;
+dev could use software-protected keys instead (no monthly fee) at the cost
+of a TUF root-key rotation, see the signing-ceremony document.
+
+## Pausing when not testing
+
+```bash
+bash infra/azure/power.sh status   # API replicas, database state, month-to-date cost
+bash infra/azure/power.sh pause    # API to 0 replicas, PostgreSQL stopped
+bash infra/azure/power.sh resume   # PostgreSQL started, API to 1 replica, health check
+```
+
+Before pausing, switch the lab gateway away (`sudo cv-use-saas lab`) or shut
+its VM down. While paused, schedules do not fire; on resume each overdue
+schedule fires once and then keeps its interval. Azure restarts a stopped
+PostgreSQL server by itself after 7 days, and a deployment needs the server
+running, so `resume` first.
+
+## Schedules
+
+The scheduler skips a run while that schedule's previous job is still queued,
+or running for less than `SAAS_JOB_API_SCHEDULE_RUNNING_JOB_TIMEOUT_SECONDS`
+(default 6 h; older running jobs count as stuck). Edit a schedule with
+`PATCH /admin/v1/tenants/{tenantId}/schedules/{scheduleId}` and any of
+`intervalSeconds` (minimum 300), `enabled` (false pauses it), `nextRunAt`.
 
 ## Production differences
 
