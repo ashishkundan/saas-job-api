@@ -16,6 +16,9 @@ param location string = 'australiaeast'
 @description('API container image, by digest: <acr>.azurecr.io/saas-job-api@sha256:...')
 param apiImage string
 
+@description('PostgreSQL client image for the read-only query job, by digest (imported into the registry).')
+param sqlImage string = '${acrName}.azurecr.io/tools/postgres@sha256:a77aa70e641402a21411b92b721c58d10f23b50ae5fdd2333efd22d166e1e5f7'
+
 @description('Existing Azure Container Registry (in the app resource group).')
 param acrName string = 'acrcv360${env}'
 
@@ -86,6 +89,7 @@ module app 'modules/app.bicep' = {
     env: env
     location: location
     apiImage: apiImage
+    sqlImage: sqlImage
     acrName: acrName
     infrastructureSubnetId: network.outputs.containerAppsSubnetId
     logAnalyticsWorkspaceId: monitor.outputs.workspaceId
@@ -99,4 +103,5 @@ module app 'modules/app.bicep' = {
 
 output apiUrl string = app.outputs.apiUrl
 output migrationJobName string = app.outputs.migrationJobName
+output sqlJobName string = app.outputs.sqlJobName
 output postgresFqdn string = data.outputs.fqdn

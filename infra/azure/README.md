@@ -83,3 +83,20 @@ The subscription's budget alert (`cv360-dev-monthly`, $30) has to be raised befo
 - ACR Premium, so the registry gets a private endpoint and the gateways' pull path can be restricted.
 - A custom domain with a managed certificate on the API, plus front-door/WAF if needed.
 - Gateways on mTLS registration instead of bearer tokens in `gateway-tokens-json`.
+
+## Querying the database (read-only)
+
+PostgreSQL has no public endpoint. To look at the data, run a query inside Azure:
+
+```bash
+bash infra/azure/sql.sh "SELECT target_id, subject, valid_to FROM certificate_records ORDER BY received_at DESC LIMIT 20"
+```
+
+The job `caj-cv360-sql-dev` runs it with `psql` in the private network as the role
+`cv_readonly`: SELECT only, read-only transactions, and no access to tables that hold
+token or password hashes. Each run gives the role a fresh random password that is
+valid for 15 minutes and never output; the query never runs as the admin. The result
+is read back from Log Analytics, so a query takes 1–3 minutes.
+
+Useful tables: `jobs` (state, `reserved_by`, tenant/target), `job_results`
+(record count per job), `certificate_records` (one row per certificate found).

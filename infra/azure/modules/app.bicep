@@ -4,6 +4,7 @@
 param env string
 param location string
 param apiImage string
+param sqlImage string
 param acrName string
 param infrastructureSubnetId string
 param logAnalyticsWorkspaceId string
@@ -138,5 +139,78 @@ resource migrate 'Microsoft.App/jobs@2024-03-01' = {
   }
 }
 
+// Read-only SQL from an operator laptop while PostgreSQL stays private:
+// infra/azure/sql.sh starts this job with QUERY_B64 (base64 SQL) and prints
+// its log. Each run sets a fresh random password, valid for 15 minutes and
+// never output, on the role cv_readonly (SELECT only, read-only
+// transactions, no access to tables holding token or password hashes), and
+// runs the query as that role - never as the admin.
+// Container Apps (like Kubernetes) turns "$$" in a command into "$", so the
+// SQL below uses named dollar quotes ($do$) and must never contain "$$".
+var sqlScript = '''
+set -eu
+trap 'echo "---- end (exit $?) ----"' EXIT
+q=$(printf %s "${QUERY_B64:-}" | base64 -d)
+[ -n "$q" ] || { echo "no query: start the job with QUERY_B64" >&2; exit 2; }
+pw=$(head -c 48 /dev/urandom | base64 | tr -dc A-Za-z0-9 | head -c 32)
+until=$(date -u -d "@$(( $(date +%s) + 900 ))" '+%Y-%m-%d %H:%M:%S+00')
+psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -v pw="$pw" -v until="$until" <<'SQL'
+DO $do$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'cv_readonly') THEN CREATE ROLE cv_readonly LOGIN; END IF;
+END $do$;
+ALTER ROLE cv_readonly PASSWORD :'pw' VALID UNTIL :'until';
+ALTER ROLE cv_readonly SET default_transaction_read_only = on;
+GRANT CONNECT ON DATABASE saas TO cv_readonly;
+GRANT USAGE ON SCHEMA public TO cv_readonly;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO cv_readonly;
+DO $do$ DECLARE t text; BEGIN
+  FOR t IN SELECT DISTINCT table_name FROM information_schema.columns
+           WHERE table_schema = 'public'
+             AND (column_name LIKE '%token_hash%' OR column_name LIKE '%password%' OR column_name LIKE '%secret%')
+  LOOP EXECUTE format('REVOKE SELECT ON %I FROM cv_readonly', t); END LOOP;
+END $do$;
+SQL
+host=$(printf %s "$DATABASE_URL" | sed -E 's#^[a-z]+://[^@]+@([^:/?]+).*#\1#')
+echo "---- query (as cv_readonly) ----"
+printf '%s\n' "$q"
+echo "---- result ----"
+PGPASSWORD=$pw psql "host=$host port=5432 dbname=saas user=cv_readonly sslmode=require" \
+  -X -v ON_ERROR_STOP=1 -P pager=off -P footer=on -c "$q"
+'''
+
+resource sql 'Microsoft.App/jobs@2024-03-01' = {
+  name: 'caj-cv360-sql-${env}'
+  location: location
+  identity: identity
+  dependsOn: [pull]
+  properties: {
+    environmentId: environment.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      triggerType: 'Manual'
+      replicaTimeout: 300
+      replicaRetryLimit: 0
+      manualTriggerConfig: { parallelism: 1, replicaCompletionCount: 1 }
+      registries: registries
+      secrets: [{ name: 'database-url', keyVaultUrl: '${keyVaultUri}secrets/database-url', identity: identityId }]
+    }
+    template: {
+      containers: [
+        {
+          name: 'sql'
+          image: sqlImage
+          command: ['/bin/sh', '-c', sqlScript]
+          resources: { cpu: json('0.25'), memory: '0.5Gi' }
+          env: [
+            { name: 'DATABASE_URL', secretRef: 'database-url' }
+            { name: 'QUERY_B64', value: '' }
+          ]
+        }
+      ]
+    }
+  }
+}
+
 output apiUrl string = 'https://${api.properties.configuration.ingress.fqdn}'
 output migrationJobName string = migrate.name
+output sqlJobName string = sql.name
