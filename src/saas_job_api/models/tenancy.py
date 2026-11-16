@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class TenantCreateRequest(BaseModel):
@@ -51,6 +53,52 @@ class TargetResponse(BaseModel):
     effective_plugin_version: str | None = Field(alias="effectivePluginVersion")
     credential_ref: str | None = Field(default=None, alias="credentialRef")
     created_at: datetime = Field(alias="createdAt")
+
+
+class TargetBulkCreateRequest(BaseModel):
+    """One server, many ports: one Target per port, id "<serverId>-<port>"."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    # 44 + "-" + 5 port digits stays within the 50-character target_id column.
+    server_id: str = Field(alias="serverId", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,43}$")
+    name: str | None = None  # default: serverId; each target is "<name> port <port>"
+    host: str = Field(min_length=1, max_length=253)
+    ports: list[int] = Field(min_length=1, max_length=1024)
+    plugin_ref: str = Field(alias="pluginRef")
+    plugin_version: str | None = Field(default=None, alias="pluginVersion", pattern=r"^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$")
+    credential_ref: str | None = Field(default=None, alias="credentialRef")
+
+    @field_validator("ports")
+    @classmethod
+    def _valid_unique_ports(cls, ports: list[int]) -> list[int]:
+        bad = [p for p in ports if not 1 <= p <= 65535]
+        if bad:
+            raise ValueError(f"ports must be 1-65535: {bad}")
+        if len(set(ports)) != len(ports):
+            raise ValueError("ports must be unique")
+        return ports
+
+
+class TargetBulkResult(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    port: int
+    target_id: str = Field(alias="targetId")
+    # created: new target. exists: identical target already there (no change).
+    # conflict: a target with this id exists with different settings (no change).
+    status: Literal["created", "exists", "conflict"]
+    detail: str | None = None
+
+
+class TargetBulkCreateResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    server_id: str = Field(alias="serverId")
+    created: int
+    existing: int
+    conflicts: int
+    results: list[TargetBulkResult]
 
 
 class PluginEntitlementRequest(BaseModel):

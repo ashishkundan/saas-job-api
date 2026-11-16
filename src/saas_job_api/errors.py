@@ -32,7 +32,11 @@ def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RequestValidationError)
     async def _on_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
         # TDD §9.3 has no 422 entry; a malformed request is a "client contract defect" -> 400.
-        return JSONResponse(status_code=400, content={"error": "MALFORMED_REQUEST", "detail": exc.errors()})
+        # Only type/loc/msg: "ctx" can hold the raw exception (not JSON-serialisable,
+        # which turned validator errors into 500s) and "input" would echo request
+        # data such as passwords back to the caller.
+        detail = [{"type": e.get("type"), "loc": list(e.get("loc", ())), "msg": e.get("msg")} for e in exc.errors()]
+        return JSONResponse(status_code=400, content={"error": "MALFORMED_REQUEST", "detail": detail})
 
     @app.exception_handler(BadRequestError)
     async def _on_bad_request(_: Request, exc: BadRequestError) -> JSONResponse:

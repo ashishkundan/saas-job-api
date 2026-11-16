@@ -13,7 +13,13 @@ from ..auth import authenticated_admin_principal, require_any_role, require_tena
 from ..errors import BadRequestError, ConflictError, NotFoundError
 from ..identity import AdminRole
 from ..jwt_tokens import TokenClaims
-from ..models.tenancy import TargetCreateRequest, TargetResponse
+from ..models.tenancy import (
+    TargetBulkCreateRequest,
+    TargetBulkCreateResponse,
+    TargetBulkResult,
+    TargetCreateRequest,
+    TargetResponse,
+)
 from ..plugin_store_base import PluginStoreBase
 from ..target_store_base import TargetStoreBase
 from ..tenancy import Target, new_target_id, resolve_plugin_version
@@ -94,6 +100,67 @@ async def create_target(
         tenant_id=tenant_id, resource_type="target", resource_id=target.target_id, now=now,
     )
     return _to_response(target, pins)
+
+
+@router.post("/bulk", response_model=TargetBulkCreateResponse)
+async def create_targets_bulk(
+    tenant_id: str,
+    body: TargetBulkCreateRequest,
+    store: TargetStoreBase = Depends(get_target_store),
+    audit_store: AuditLogStoreBase = Depends(get_audit_store),
+    clock: Clock = Depends(get_clock),
+    claims: TokenClaims = Depends(require_any_role(*_WRITE_ROLES)),
+    plugin_store: PluginStoreBase = Depends(get_plugin_store),
+) -> TargetBulkCreateResponse:
+    """One server, many ports: one Target per port (id "<serverId>-<port>").
+    Idempotent - an identical existing target is reported as "exists"; one
+    with the same id but other settings as "conflict"; neither is changed.
+    Entitlement and version are checked before anything is created."""
+    require_tenant_access(claims, tenant_id)
+    pins = await plugin_store.pinned_versions(tenant_id)
+    if body.plugin_ref not in pins:
+        raise BadRequestError(f"tenant {tenant_id} is not entitled to plugin {body.plugin_ref}")
+    if body.plugin_version is None and pins[body.plugin_ref] is None:
+        raise BadRequestError(
+            f"no pluginVersion given and tenant {tenant_id} has no pinned version of {body.plugin_ref}"
+        )
+    name = body.name or body.server_id
+    wanted = (body.host, body.plugin_ref, body.plugin_version, body.credential_ref)
+    now = clock.now()
+    results: list[TargetBulkResult] = []
+    for port in body.ports:
+        target_id = f"{body.server_id}-{port}"
+        existing = await store.get(tenant_id, target_id)
+        if existing is None:
+            target = Target(
+                target_id=target_id, tenant_id=tenant_id, name=f"{name} port {port}",
+                host=body.host, port=port, plugin_ref=body.plugin_ref,
+                plugin_version=body.plugin_version, credential_ref=body.credential_ref, created_at=now,
+            )
+            try:
+                await store.create(target)
+            except ValueError:  # created concurrently, or the id is taken in another tenant
+                results.append(TargetBulkResult(port=port, targetId=target_id, status="conflict",
+                                                detail="target id already in use"))
+                continue
+            await record_audit_event(
+                audit_store, event_type="TARGET_CREATED", actor=claims.subject,
+                tenant_id=tenant_id, resource_type="target", resource_id=target_id, now=now,
+            )
+            results.append(TargetBulkResult(port=port, targetId=target_id, status="created"))
+        elif (existing.host, existing.plugin_ref, existing.plugin_version, existing.credential_ref) == wanted \
+                and existing.port == port:
+            results.append(TargetBulkResult(port=port, targetId=target_id, status="exists"))
+        else:
+            results.append(TargetBulkResult(
+                port=port, targetId=target_id, status="conflict",
+                detail=f"exists with other settings ({existing.host}:{existing.port}, {existing.plugin_ref})",
+            ))
+    count = {s: sum(r.status == s for r in results) for s in ("created", "exists", "conflict")}
+    return TargetBulkCreateResponse(
+        serverId=body.server_id, created=count["created"], existing=count["exists"],
+        conflicts=count["conflict"], results=results,
+    )
 
 
 @router.get("", response_model=list[TargetResponse])
