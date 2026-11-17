@@ -118,7 +118,8 @@ async def poll_jobs(
     )
 
     if not chosen:
-        logger.info(
+        # DEBUG: every empty poll of every gateway, every few seconds.
+        logger.debug(
             "poll_no_jobs",
             extra={
                 "event": "poll_no_jobs",

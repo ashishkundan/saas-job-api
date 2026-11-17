@@ -15,6 +15,7 @@ from .certs import CertificateAuthority, generate_ca
 from .config import Settings, settings as default_settings
 from .domain import JobRecord
 from .errors import install_exception_handlers
+from .logging_config import configure_logging
 from .health_store_memory import MemoryHealthStore
 from .health_store_postgres import PostgresHealthStore
 from .audit_retention import AuditRetentionSweeper
@@ -208,4 +209,9 @@ def create_app(*, settings: Settings | None = None, clock: Clock | None = None) 
     return app
 
 
+
+# The server process (uvicorn saas_job_api.main:app) logs JSON to stdout at
+# SAAS_JOB_API_LOG_LEVEL. Done here, not in create_app(), so tests that build
+# their own apps keep pytest's log handling.
+configure_logging(default_settings.log_level)
 app = create_app()
