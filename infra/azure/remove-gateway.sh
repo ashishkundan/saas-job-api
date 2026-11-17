@@ -36,9 +36,16 @@ print(removed if (removed or had_tenant) else "none")
 EOF
 )
 if [[ $removed == none ]]; then echo "gateway $GW is not registered; nothing to do" >&2; exit 0; fi
+# Pin the new secret versions before restarting (see add-gateway.sh).
+uami=$(az containerapp show -g "$APP_RG" -n "$APP" \
+  --query "properties.configuration.secrets[?name=='gateway-tokens-json'].identity | [0]" -o tsv | tr -d '\r')
+refs=()
 for s in tokens tenants; do
-  az keyvault secret set --vault-name "$VAULT" -n "gateway-$s-json" --file "$(native "$dir/$s")" --encoding utf-8 -o none
+  id=$(az keyvault secret set --vault-name "$VAULT" -n "gateway-$s-json" --file "$(native "$dir/$s")" \
+    --encoding utf-8 --query id -o tsv | tr -d '\r')
+  refs+=("gateway-$s-json=keyvaultref:$id,identityref:$uami")
 done
+az containerapp secret set -g "$APP_RG" -n "$APP" --secrets "${refs[@]}" --only-show-errors -o none
 rev=$(az containerapp show -g "$APP_RG" -n "$APP" --query properties.latestRevisionName -o tsv | tr -d '\r')
 az containerapp revision restart -g "$APP_RG" -n "$APP" --revision "$rev" -o none
 echo "gateway $GW removed ($removed token(s)); API revision $rev restarted" >&2

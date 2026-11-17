@@ -43,9 +43,19 @@ json.dump(tokens, open(os.path.join(d, "tokens"), "w"))
 json.dump(tenants, open(os.path.join(d, "tenants"), "w"))
 open(os.path.join(d, "token"), "w").write(token)
 EOF
+# A restart alone reuses Container Apps' cached copy of Key Vault secrets
+# (refreshed only every ~30 min), so the app is pointed at the exact new
+# secret versions first; a pinned version cannot be served stale. The next
+# Bicep deployment points them back to the latest version.
+uami=$(az containerapp show -g "$APP_RG" -n "$APP" \
+  --query "properties.configuration.secrets[?name=='gateway-tokens-json'].identity | [0]" -o tsv | tr -d '\r')
+refs=()
 for s in tokens tenants; do
-  az keyvault secret set --vault-name "$VAULT" -n "gateway-$s-json" --file "$(native "$dir/$s")" --encoding utf-8 -o none
+  id=$(az keyvault secret set --vault-name "$VAULT" -n "gateway-$s-json" --file "$(native "$dir/$s")" \
+    --encoding utf-8 --query id -o tsv | tr -d '\r')
+  refs+=("gateway-$s-json=keyvaultref:$id,identityref:$uami")
 done
+az containerapp secret set -g "$APP_RG" -n "$APP" --secrets "${refs[@]}" --only-show-errors -o none
 rev=$(az containerapp show -g "$APP_RG" -n "$APP" --query properties.latestRevisionName -o tsv | tr -d '\r')
 az containerapp revision restart -g "$APP_RG" -n "$APP" --revision "$rev" -o none
 echo "gateway $GW -> tenant $TENANT registered; API revision $rev restarted" >&2
