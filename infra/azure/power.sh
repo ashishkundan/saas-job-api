@@ -24,8 +24,20 @@ APP_RG=rg-cv360-app-dev
 APP=ca-cv360-api-dev
 DB_RG=rg-cv360-data-dev
 DB=psql-cv360-dev
+GH_REPO=${GH_REPO:-ashishkundan/certificate-discovery-engine}
 
 az account set --subscription "$SUB"
+
+# The plugin workflows upload to vars.SAAS_URL every 8 hours and skip the
+# upload while it is unset: removed on pause so they don't fail, restored on resume.
+gh_saas_url() {
+  command -v gh >/dev/null || { echo "gh not found: set/remove the GitHub variable SAAS_URL yourself"; return 0; }
+  if [[ $1 == remove ]]; then
+    gh variable delete SAAS_URL --repo "$GH_REPO" 2>/dev/null && echo "GitHub variable SAAS_URL removed" || true
+  else
+    gh variable set SAAS_URL --repo "$GH_REPO" --body "$2" && echo "GitHub variable SAAS_URL = $2"
+  fi
+}
 
 db_state() { az postgres flexible-server show -g "$DB_RG" -n "$DB" --query state -o tsv; }
 min_replicas() { az containerapp show -g "$APP_RG" -n "$APP" --query properties.template.scale.minReplicas -o tsv; }
@@ -61,6 +73,7 @@ case "${1:-}" in
       echo "stopping PostgreSQL (takes a few minutes) ..."
       az postgres flexible-server stop -g "$DB_RG" -n "$DB" -o none
     fi
+    gh_saas_url remove
     status
     ;;
   resume)
@@ -69,9 +82,10 @@ case "${1:-}" in
       az postgres flexible-server start -g "$DB_RG" -n "$DB" -o none
     fi
     az containerapp update -g "$APP_RG" -n "$APP" --min-replicas 1 -o none
-    url="https://$(api_url)/healthz"
+    base="https://$(api_url | tr -d '\r')"
+    url="$base/healthz"
     for _ in $(seq 1 30); do
-      if curl -fsS "$url" >/dev/null 2>&1; then echo "API healthy: $url"; status; exit 0; fi
+      if curl -fsS "$url" >/dev/null 2>&1; then echo "API healthy: $url"; gh_saas_url set "$base"; status; exit 0; fi
       sleep 10
     done
     echo "API did not answer $url within 5 minutes" >&2

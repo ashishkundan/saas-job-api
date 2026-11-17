@@ -97,6 +97,22 @@ schedule fires once and then keeps its interval. Azure restarts a stopped
 PostgreSQL server by itself after 7 days, and a deployment needs the server
 running, so `resume` first.
 
+## Tearing down between test periods
+
+For breaks longer than a week, delete what is billed by the hour and rebuild later:
+
+```bash
+bash infra/azure/teardown.sh                          # asks you to type "teardown"
+bash deploy/test-lab/azure/rebuild-lab.sh             # CDE repo: ~30 min, back to a connected lab
+```
+
+Teardown deletes the API, its jobs, the Container Apps environment (and its load
+balancer), the PostgreSQL server **with all data**, and the Key Vault private
+endpoint. The registry, Key Vaults, keys, secrets, identities, network and
+Log Analytics stay. The API image in use is tagged `saas-job-api:deployed-dev`
+and `rebuild.sh` redeploys it. The API URL changes on every rebuild; the lab
+scripts look it up from Azure and `rebuild-lab.sh` updates GitHub and the gateway.
+
 ## Schedules
 
 The scheduler skips a run while that schedule's previous job is still queued,
