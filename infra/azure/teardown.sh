@@ -4,15 +4,19 @@
 #   bash infra/azure/teardown.sh          asks you to type "teardown"
 #   bash infra/azure/teardown.sh --yes    no question (scripts)
 #
-# Deleted (billed by the hour, ~AUD 3.30/day together):
+# Deleted (billed by the hour, ~AUD 2.20/day together):
 #   API container app, migrate + sql jobs, Container Apps environment (with
-#   its load balancer and public IP), PostgreSQL server, Key Vault private endpoint.
+#   its load balancer and public IP), Key Vault private endpoint.
+# Stopped, not deleted: the PostgreSQL server (storage only, ~AUD 0.10/day).
+#   All data is kept. It is not deleted because Azure may refuse to create a
+#   new one: on 2026-11-18 australiaeast answered SkuNotAvailable for B1ms and
+#   B2s on this subscription. Azure starts a stopped server by itself after
+#   7 days (compute billed again, ~AUD 1/day): run this script again, or
+#   `bash infra/azure/power.sh status`, to stop it. Running it again is safe.
 # Kept (free or cents): registry acrcv360dev, all four Key Vaults with every
 #   secret and signing key, managed identities, VNet, private DNS zones, Log Analytics.
 #
-# The DATABASE IS DELETED: tenants, targets, schedules, jobs and scan results
-# are gone. rebuild.sh plus deploy/test-lab/azure/rebuild-lab.sh (CDE repo)
-# re-create the lab setup; past results are not restored.
+# rebuild.sh starts the database again before it redeploys.
 #
 # Before deleting, the running API image is tagged saas-job-api:deployed-dev so
 # rebuild.sh redeploys exactly that image, and the GitHub variable SAAS_URL is
@@ -29,9 +33,9 @@ GH_REPO=${GH_REPO:-ashishkundan/certificate-discovery-engine}
 export MSYS_NO_PATHCONV=1
 
 if [[ ${1:-} != --yes ]]; then
-  echo "This deletes the dev API, its Container Apps environment, the PostgreSQL server"
-  echo "(ALL data: tenants, targets, schedules, jobs, scan results) and the Key Vault"
-  echo "private endpoint. Registry, Key Vaults, keys and secrets are kept."
+  echo "This deletes the dev API, its Container Apps environment and the Key Vault"
+  echo "private endpoint, and stops the PostgreSQL server (its data is kept)."
+  echo "Registry, Key Vaults, keys and secrets are kept."
   read -r -p 'Type "teardown" to continue: ' answer
   [[ $answer == teardown ]] || { echo "cancelled"; exit 1; }
 fi
@@ -71,9 +75,14 @@ if exists "$(id "$APP_RG" Microsoft.App/managedEnvironments/$ENV)"; then
   az containerapp env delete -g "$APP_RG" -n "$ENV" --yes -o none && echo "   $ENV deleted"
 fi
 
-echo "== 5. PostgreSQL server (~5 min)"
+echo "== 5. PostgreSQL server: stop, keep data (~5 min)"
 if exists "$(id "$DB_RG" Microsoft.DBforPostgreSQL/flexibleServers/$DB)"; then
-  az postgres flexible-server delete -g "$DB_RG" -n "$DB" --yes -o none && echo "   $DB deleted"
+  state=$(az postgres flexible-server show -g "$DB_RG" -n "$DB" --query state -o tsv | tr -d '')
+  if [[ $state == Ready ]]; then
+    az postgres flexible-server stop -g "$DB_RG" -n "$DB" -o none && echo "   $DB stopped"
+  else
+    echo "   $DB is $state; left as it is"
+  fi
 fi
 
 echo "== 6. Key Vault private endpoint"
@@ -82,5 +91,6 @@ if exists "$(id "$SEC_RG" Microsoft.Network/privateEndpoints/$PE)"; then
 fi
 
 echo
-echo "Torn down. Left running (no hourly charge): registry, Key Vaults, identities, VNet, DNS, Log Analytics."
+echo "Torn down. Database stopped with its data. Left (no hourly charge): registry, Key Vaults, identities, VNet, DNS, Log Analytics."
+echo "Azure restarts the stopped database after 7 days ($(date -d '+7 days' +%Y-%m-%d 2>/dev/null || echo 'in 7 days')): run this script again then."
 echo "Bring it back:  bash deploy/test-lab/azure/rebuild-lab.sh   (CDE repo; ~30 min)"

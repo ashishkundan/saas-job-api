@@ -107,9 +107,13 @@ bash deploy/test-lab/azure/rebuild-lab.sh             # CDE repo: ~30 min, back 
 ```
 
 Teardown deletes the API, its jobs, the Container Apps environment (and its load
-balancer), the PostgreSQL server **with all data**, and the Key Vault private
-endpoint. The registry, Key Vaults, keys, secrets, identities, network and
-Log Analytics stay. The API image in use is tagged `saas-job-api:deployed-dev`
+balancer) and the Key Vault private endpoint. It **stops** the PostgreSQL
+server instead of deleting it, keeping all data (storage only, ~AUD 3/month):
+on 2026-11-18 Azure refused to create a new Burstable server (B1ms and B2s,
+SkuNotAvailable) in australiaeast for this subscription. Azure restarts a
+stopped server after 7 days; run `teardown.sh` again then (it is safe to rerun)
+to stop it again. `rebuild.sh` starts it before deploying. The registry,
+Key Vaults, keys, secrets, identities, network and Log Analytics stay. The API image in use is tagged `saas-job-api:deployed-dev`
 and `rebuild.sh` redeploys it. The API URL changes on every rebuild; the lab
 scripts look it up from Azure and `rebuild-lab.sh` updates GitHub and the gateway.
 

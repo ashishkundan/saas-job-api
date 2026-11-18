@@ -15,6 +15,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SUB=5b69e8d9-2842-44ff-99eb-55eb9836576d
 LOCATION=australiaeast
 APP_RG=rg-cv360-app-dev; APP=ca-cv360-api-dev; MIGRATE=caj-cv360-migrate-dev
+DB_RG=rg-cv360-data-dev; DB=psql-cv360-dev
 ACR=acrcv360dev
 export MSYS_NO_PATHCONV=1
 native() { if command -v cygpath >/dev/null; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
@@ -28,6 +29,12 @@ if [[ -z ${API_IMAGE:-} ]]; then
   API_IMAGE=$ACR.azurecr.io/saas-job-api@$digest
 fi
 export API_IMAGE
+# teardown.sh stops the database rather than deleting it; Bicep cannot update a stopped server.
+db_state=$(az postgres flexible-server show -g "$DB_RG" -n "$DB" --query state -o tsv 2>/dev/null | tr -d '' || true)
+if [[ $db_state == Stopped ]]; then
+  echo "== 0. start the stopped database (~5 min)"
+  az postgres flexible-server start -g "$DB_RG" -n "$DB" -o none
+fi
 echo "== 1. deploy main.bicep with ${API_IMAGE##*@} (~15-20 min after a teardown)"
 az deployment sub create -n "cv360-dev-$(date +%Y%m%d%H%M)" -l "$LOCATION" \
   -f "$(native "$HERE/main.bicep")" -p "$(native "$HERE/dev.bicepparam")" \
